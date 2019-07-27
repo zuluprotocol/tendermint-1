@@ -1,11 +1,13 @@
 package v2
 
 import (
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestReactor(t *testing.T) {
-	reactor = DummyReactor{}
+	reactor := DummyReactor{}
 	reactor.Start()
 	script := Events{
 		testEvent{},
@@ -14,12 +16,7 @@ func TestReactor(t *testing.T) {
 	for _, event := range script {
 		reactor.Receive(event)
 	}
+	fmt.Println("sleeping")
+	time.Sleep(5 * time.Second)
 	reactor.Stop()
 }
-
-/*
-* Can we send a message to all routines
-* Can routines emit events
-* can we start routines
-* can we stop all routines
- */
