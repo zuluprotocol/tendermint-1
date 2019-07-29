@@ -38,6 +38,7 @@ type handleFunc = func(event Event) Events
 type Routine struct {
 	name    string
 	input   chan Event
+	errors  chan errEvent
 	output  chan Event
 	stopped chan struct{}
 	handle  handleFunc
@@ -47,47 +48,69 @@ func newRoutine(name string, output chan Event, handleFunc handleFunc) *Routine 
 	return &Routine{
 		name:    name,
 		input:   make(chan Event, 1),
+		errors:  make(chan errEvent, 1),
 		output:  output,
 		stopped: make(chan struct{}, 1),
 		handle:  handleFunc,
 	}
 }
 
-// let's test some events coming out
+type errEvent struct{}
 
-// XXX: what about error handling?
-// we need an additional error channel here which will ensure
-// errors get processed as soon as possible
+// run thriough input an errors giving errors a chance to skip the queue
 func (rt *Routine) run() {
 	fmt.Printf("%s: run\n", rt.name)
 	for {
-		iEvent, ok := <-rt.input
-		if !ok {
-			fmt.Printf("%s: stopping\n", rt.name)
-			rt.stopped <- struct{}{}
-			break
-		}
-		oEvents := rt.handle(iEvent)
-		fmt.Printf("%s handled %d events\n", rt.name, len(oEvents))
-		for _, event := range oEvents {
-			rt.output <- event // these are not being routed back
+		select {
+		case iEvent, ok := <-rt.input:
+			if !ok {
+				fmt.Printf("%s: stopping\n", rt.name)
+				rt.stopped <- struct{}{}
+				break
+			}
+			oEvents := rt.handle(iEvent)
+			fmt.Printf("%s handled %d events\n", rt.name, len(oEvents))
+			for _, event := range oEvents {
+				rt.output <- event
+			}
+		case iEvent, ok := <-rt.errors:
+			if !ok {
+				fmt.Printf("%s: errors closed\n", rt.name)
+				continue
+			}
+			oEvents := rt.handle(iEvent)
+			fmt.Printf("%s handled %d events from errors\n", rt.name, len(oEvents))
+			for _, event := range oEvents {
+				rt.output <- event
+			}
 		}
 	}
 }
 
 func (rt *Routine) send(event Event) bool {
 	fmt.Printf("%s: send\n", rt.name)
-	select {
-	case rt.input <- event:
-		return true
-	default:
-		fmt.Printf("%s: channel was full\n", rt.name)
-		return false
+	if err, ok := event.(errEvent); ok {
+		select {
+		case rt.errors <- err:
+			return true
+		default:
+			fmt.Printf("%s: errors channel was full\n", rt.name)
+			return false
+		}
+	} else {
+		select {
+		case rt.input <- event:
+			return true
+		default:
+			fmt.Printf("%s: channel was full\n", rt.name)
+			return false
+		}
 	}
 }
 
 func (rt *Routine) stop() {
 	fmt.Printf("%s: stop\n", rt.name)
+	close(rt.errors)
 	close(rt.input)
 	<-rt.stopped
 }
@@ -260,7 +283,6 @@ func (dr *DummyReactor) Start() {
 			}
 		}
 	}()
-
 }
 
 func (dr *DummyReactor) Wait() {
