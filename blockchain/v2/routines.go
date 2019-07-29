@@ -2,32 +2,7 @@ package v2
 
 import (
 	"fmt"
-	"time"
 )
-
-/*
-TODO:
-	* Look at refactoring routines
-		* single struct, paramterize the handle function
-	* introduce an sendError and seperate error channel
-	* How could this be tested?
-		* Ensure Start/Stopping
-		* Ensure all messages sent are processed
-		* Ensure that errors can be processed depsite outstanding messages
-*/
-type testEvent struct {
-	msg  string
-	time time.Time
-}
-
-type testEventTwo struct {
-	msg string
-}
-
-type stopEvent struct{}
-type timeCheck struct {
-	time time.Time
-}
 
 // XXX: what about state here, we need per routine state
 // So handle func should take an event and a reference to state and return
@@ -55,9 +30,6 @@ func newRoutine(name string, output chan Event, handleFunc handleFunc) *Routine 
 	}
 }
 
-type errEvent struct{}
-
-// run thriough input an errors giving errors a chance to skip the queue
 func (rt *Routine) run() {
 	fmt.Printf("%s: run\n", rt.name)
 	for {
@@ -115,8 +87,6 @@ func (rt *Routine) stop() {
 	<-rt.stopped
 }
 
-type scTestEvent struct{}
-
 func schedulerHandle(event Event) Events {
 	switch event.(type) {
 	case timeCheck:
@@ -127,8 +97,6 @@ func schedulerHandle(event Event) Events {
 	}
 	return Events{}
 }
-
-type pcFinished struct{}
 
 func processorHandle(event Event) Events {
 	switch event.(type) {
@@ -202,114 +170,3 @@ func (dm *demuxer) run() {
 
 type scFull struct{}
 type pcFull struct{}
-
-// XXX: What is the corerct behaviour here?
-// onPcFinish, process no further events
-// OR onPcFinish, process all queued events and then close
-func (dm *demuxer) handle(event Event) Events {
-	switch event.(type) {
-	case pcFinished:
-		// dm.stop()
-		fmt.Println("demuxer received pcFinished")
-		dm.finished <- struct{}{}
-	default:
-		received := dm.scheduler.send(event)
-		if !received {
-			return Events{scFull{}} // backpressure
-		}
-
-		received = dm.processor.send(event)
-		if !received {
-			return Events{pcFull{}} // backpressure
-		}
-
-		return Events{}
-	}
-	return Events{}
-}
-
-func (dm *demuxer) send(event Event) bool {
-	fmt.Printf("demuxer send\n")
-	select {
-	case dm.eventbus <- event:
-		return true
-	default:
-		fmt.Printf("demuxer channel was full\n")
-		return false
-	}
-}
-
-func (dm *demuxer) stop() {
-	fmt.Printf("demuxer stop\n")
-	close(dm.eventbus)
-	<-dm.stopped
-}
-
-// reactor
-type DummyReactor struct {
-	events        chan Event
-	demuxer       *demuxer
-	scheduler     *Routine
-	processor     *Routine
-	ticker        *time.Ticker
-	tickerStopped chan struct{}
-	completed     chan struct{}
-}
-
-func (dr *DummyReactor) Start() {
-	bufferSize := 10
-	events := make(chan Event, bufferSize)
-
-	dr.completed = make(chan struct{}, 1)
-
-	dr.scheduler = newRoutine("scheduler", events, schedulerHandle)
-	dr.processor = newRoutine("processor", events, processorHandle)
-	dr.demuxer = newDemuxer(dr.scheduler, dr.processor)
-	dr.tickerStopped = make(chan struct{})
-
-	go dr.scheduler.run()
-	go dr.processor.run()
-	go dr.demuxer.run()
-
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		for {
-			select {
-			case <-ticker.C:
-				dr.demuxer.send(timeCheck{})
-			case <-dr.tickerStopped:
-				fmt.Println("ticker stopped")
-				return
-			}
-		}
-	}()
-}
-
-func (dr *DummyReactor) Wait() {
-	<-dr.demuxer.finished // maybe put this in a wait method
-	fmt.Println("completed routines")
-	dr.Stop()
-}
-
-func (dr *DummyReactor) Stop() {
-	fmt.Println("reactor stopping")
-
-	dr.tickerStopped <- struct{}{}
-	dr.demuxer.stop()
-	dr.scheduler.stop()
-	dr.processor.stop()
-
-	fmt.Println("reactor stopped")
-}
-
-func (dr *DummyReactor) Receive(event Event) {
-	fmt.Println("receive event")
-	sent := dr.demuxer.send(event)
-	if !sent {
-		panic("demuxer is full")
-	}
-}
-
-func (dr *DummyReactor) AddPeer() {
-	// TODO: add peer event and send to demuxer
-}
