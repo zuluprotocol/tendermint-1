@@ -21,3 +21,12 @@ type errEvent struct{}
 type scTestEvent struct{}
 
 type pcFinished struct{}
+
+type routineFinished struct{}
+
+func (rf *routineFinished) Error() string {
+	return "routine finished"
+}
+
+type scFull struct{}
+type pcFull struct{}

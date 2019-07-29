@@ -55,14 +55,11 @@ type Reactor struct {
 	processor     *Routine
 	ticker        *time.Ticker
 	tickerStopped chan struct{}
-	completed     chan struct{}
 }
 
 func (r *Reactor) Start() {
 	bufferSize := 10
 	events := make(chan Event, bufferSize)
-
-	r.completed = make(chan struct{}, 1)
 
 	r.scheduler = newRoutine("scheduler", events, schedulerHandle)
 	r.processor = newRoutine("processor", events, processorHandle)
