@@ -66,7 +66,7 @@ func (rt *Routine) run() {
 			if !ok {
 				fmt.Printf("%s: stopping\n", rt.name)
 				rt.stopped <- struct{}{}
-				break
+				return
 			}
 			oEvents := rt.handle(iEvent)
 			fmt.Printf("%s handled %d events\n", rt.name, len(oEvents))
@@ -170,7 +170,7 @@ func (dm *demuxer) run() {
 			if !ok {
 				fmt.Printf("demuxer: stopping\n")
 				dm.stopped <- struct{}{}
-				break
+				return
 			}
 			oEvents := dm.handle(event)
 			for _, event := range oEvents {
