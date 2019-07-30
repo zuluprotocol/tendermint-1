@@ -4,9 +4,11 @@ import (
 	"fmt"
 )
 
-// XXX: what about state here, we need per routine state
-// So handle func should take an event and a reference to state and return
-// events and the new state
+// TODO
+// break out routines
+// logging
+// metrics
+
 type handleFunc = func(event Event) Events
 
 // Routine
@@ -130,60 +132,4 @@ func processorHandle(event Event) Events {
 		return Events{pcFinished{}}
 	}
 	return Events{}
-}
-
-type demuxer struct {
-	eventbus  chan Event
-	scheduler *Routine
-	processor *Routine
-	finished  chan struct{}
-	stopped   chan struct{}
-}
-
-func newDemuxer(scheduler *Routine, processor *Routine) *demuxer {
-	return &demuxer{
-		eventbus:  make(chan Event, 10),
-		scheduler: scheduler,
-		processor: processor,
-		stopped:   make(chan struct{}, 1),
-		finished:  make(chan struct{}, 1),
-	}
-}
-
-func (dm *demuxer) run() {
-	fmt.Printf("demuxer: run\n")
-	for {
-		select {
-		case event, ok := <-dm.eventbus:
-			if !ok {
-				fmt.Printf("demuxer: stopping\n")
-				dm.stopped <- struct{}{}
-				return
-			}
-			oEvents := dm.handle(event)
-			for _, event := range oEvents {
-				dm.eventbus <- event
-			}
-		case event, ok := <-dm.scheduler.output:
-			if !ok {
-				fmt.Printf("demuxer: scheduler output closed\n")
-				continue
-				// todo: close?
-			}
-			oEvents := dm.handle(event)
-			for _, event := range oEvents {
-				dm.eventbus <- event
-			}
-		case event, ok := <-dm.processor.output:
-			if !ok {
-				fmt.Printf("demuxer: processor output closed\n")
-				continue
-				// todo: close?
-			}
-			oEvents := dm.handle(event)
-			for _, event := range oEvents {
-				dm.eventbus <- event
-			}
-		}
-	}
 }

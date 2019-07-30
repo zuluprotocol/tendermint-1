@@ -5,48 +5,6 @@ import (
 	"time"
 )
 
-// XXX: What is the corerct behaviour here?
-// onPcFinish, process no further events
-// OR onPcFinish, process all queued events and then close
-func (dm *demuxer) handle(event Event) Events {
-	switch event.(type) {
-	case pcFinished:
-		// dm.stop()
-		fmt.Println("demuxer received pcFinished")
-		dm.finished <- struct{}{}
-	default:
-		received := dm.scheduler.send(event)
-		if !received {
-			return Events{scFull{}} // backpressure
-		}
-
-		received = dm.processor.send(event)
-		if !received {
-			return Events{pcFull{}} // backpressure
-		}
-
-		return Events{}
-	}
-	return Events{}
-}
-
-func (dm *demuxer) send(event Event) bool {
-	fmt.Printf("demuxer send\n")
-	select {
-	case dm.eventbus <- event:
-		return true
-	default:
-		fmt.Printf("demuxer channel was full\n")
-		return false
-	}
-}
-
-func (dm *demuxer) stop() {
-	fmt.Printf("demuxer stop\n")
-	close(dm.eventbus)
-	<-dm.stopped
-}
-
 // reactor
 type Reactor struct {
 	events        chan Event
