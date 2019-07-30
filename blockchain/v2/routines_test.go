@@ -56,6 +56,8 @@ func TestStatefulRoutine(t *testing.T) {
 	go routine.run()
 	go routine.feedback()
 
+	go routine.send(eventA{})
+
 	routine.wait()
 }
 
