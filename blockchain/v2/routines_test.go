@@ -30,8 +30,6 @@ func TestRoutine(t *testing.T) {
 	routine.wait()
 }
 
-type incEvent struct{}
-
 func genStatefulHandler(maxCount int) handleFunc {
 	counter := 0
 	return func(event Event) Events {
@@ -73,7 +71,7 @@ func handleWithErrors(event Event) Events {
 
 func TestErrorSaturation(t *testing.T) {
 	events := make(chan Event, 10)
-	routine := newRoutine("statefulRoutine", events, handleWithErrors)
+	routine := newRoutine("errorRoutine", events, handleWithErrors)
 
 	go routine.run()
 	go func() {
