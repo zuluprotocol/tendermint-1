@@ -34,6 +34,8 @@ func newRoutine(name string, output chan Event, handleFunc handleFunc) *Routine 
 	}
 }
 
+// TODO: refactor the handle to return an second variable, error which can signal
+//to the run looop when the handler is done
 func (rt *Routine) run() {
 	fmt.Printf("%s: run\n", rt.name)
 	for {
@@ -45,6 +47,7 @@ func (rt *Routine) run() {
 				return
 			}
 			oEvents := rt.handle(iEvent)
+			// XXX: this should check for error and exit if error
 			fmt.Printf("%s handled %d events\n", rt.name, len(oEvents))
 			for _, event := range oEvents {
 				// check for finished
@@ -107,29 +110,4 @@ func (rt *Routine) stop() {
 // channel and let the caller deicde how long to wait
 func (rt *Routine) wait() {
 	<-rt.finished
-}
-
-func schedulerHandle(event Event) Events {
-	switch event.(type) {
-	case timeCheck:
-		fmt.Println("scheduler handle timeCheck")
-	case testEvent:
-		fmt.Println("scheduler handle testEvent")
-		return Events{scTestEvent{}}
-	}
-	return Events{}
-}
-
-func processorHandle(event Event) Events {
-	switch event.(type) {
-	case timeCheck:
-		fmt.Println("processor handle timeCheck")
-	case testEvent:
-		fmt.Println("processor handle testEvent")
-	case scTestEvent:
-		fmt.Println("processor handle scTestEvent")
-		// should i stop myself?
-		return Events{pcFinished{}}
-	}
-	return Events{}
 }

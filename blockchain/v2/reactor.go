@@ -5,6 +5,31 @@ import (
 	"time"
 )
 
+func schedulerHandle(event Event) Events {
+	switch event.(type) {
+	case timeCheck:
+		fmt.Println("scheduler handle timeCheck")
+	case testEvent:
+		fmt.Println("scheduler handle testEvent")
+		return Events{scTestEvent{}}
+	}
+	return Events{}
+}
+
+func processorHandle(event Event) Events {
+	switch event.(type) {
+	case timeCheck:
+		fmt.Println("processor handle timeCheck")
+	case testEvent:
+		fmt.Println("processor handle testEvent")
+	case scTestEvent:
+		fmt.Println("processor handle scTestEvent")
+		// should i stop myself?
+		return Events{pcFinished{}}
+	}
+	return Events{}
+}
+
 // reactor
 type Reactor struct {
 	events        chan Event
