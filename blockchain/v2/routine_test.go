@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -8,14 +9,16 @@ import (
 type eventA struct{}
 type eventB struct{}
 
-func simpleHandler(event Event) Events {
+var done = fmt.Errorf("done")
+
+func simpleHandler(event Event) (Events, error) {
 	switch event.(type) {
 	case eventA:
-		return Events{eventB{}}
+		return Events{eventB{}}, nil
 	case eventB:
-		return Events{routineFinished{}}
+		return Events{routineFinished{}}, done
 	}
-	return Events{}
+	return Events{}, nil
 }
 
 func TestRoutine(t *testing.T) {
@@ -32,17 +35,17 @@ func TestRoutine(t *testing.T) {
 
 func genStatefulHandler(maxCount int) handleFunc {
 	counter := 0
-	return func(event Event) Events {
+	return func(event Event) (Events, error) {
 		switch event.(type) {
 		case eventA:
 			counter += 1
 			if counter >= maxCount {
-				return Events{routineFinished{}}
+				return Events{}, done
 			}
 
-			return Events{eventA{}}
+			return Events{eventA{}}, nil
 		}
-		return Events{}
+		return Events{}, nil
 	}
 }
 
@@ -59,14 +62,14 @@ func TestStatefulRoutine(t *testing.T) {
 	routine.wait()
 }
 
-func handleWithErrors(event Event) Events {
+func handleWithErrors(event Event) (Events, error) {
 	switch event.(type) {
 	case eventA:
-		return Events{}
+		return Events{}, nil
 	case errEvent:
-		return Events{routineFinished{}}
+		return Events{}, done
 	}
-	return Events{}
+	return Events{}, nil
 }
 
 func TestErrorSaturation(t *testing.T) {

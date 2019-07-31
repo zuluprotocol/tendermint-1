@@ -5,18 +5,18 @@ import (
 	"time"
 )
 
-func schedulerHandle(event Event) Events {
+func schedulerHandle(event Event) (Events, error) {
 	switch event.(type) {
 	case timeCheck:
 		fmt.Println("scheduler handle timeCheck")
 	case testEvent:
 		fmt.Println("scheduler handle testEvent")
-		return Events{scTestEvent{}}
+		return Events{scTestEvent{}}, nil
 	}
-	return Events{}
+	return Events{}, nil
 }
 
-func processorHandle(event Event) Events {
+func processorHandle(event Event) (Events, error) {
 	switch event.(type) {
 	case timeCheck:
 		fmt.Println("processor handle timeCheck")
@@ -24,10 +24,9 @@ func processorHandle(event Event) Events {
 		fmt.Println("processor handle testEvent")
 	case scTestEvent:
 		fmt.Println("processor handle scTestEvent")
-		// should i stop myself?
-		return Events{pcFinished{}}
+		return Events{}, fmt.Errorf("processor done")
 	}
-	return Events{}
+	return Events{}, nil
 }
 
 // reactor
@@ -69,7 +68,6 @@ func (r *Reactor) Start() {
 }
 
 func (r *Reactor) Wait() {
-	<-r.demuxer.finished // maybe put this in a wait method
 	fmt.Println("completed routines")
 	r.Stop()
 }

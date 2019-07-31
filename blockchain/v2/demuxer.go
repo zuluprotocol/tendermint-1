@@ -6,7 +6,7 @@ type demuxer struct {
 	eventbus  chan Event
 	scheduler *Routine
 	processor *Routine
-	finished  chan struct{}
+	finished  chan error
 	stopped   chan struct{}
 }
 
@@ -16,10 +16,12 @@ func newDemuxer(scheduler *Routine, processor *Routine) *demuxer {
 		scheduler: scheduler,
 		processor: processor,
 		stopped:   make(chan struct{}, 1),
-		finished:  make(chan struct{}, 1),
+		finished:  make(chan error, 1),
 	}
 }
 
+// What should the termination clause be?
+// Is any of the subroutines finishe, the demuxer finishes
 func (dm *demuxer) run() {
 	fmt.Printf("demuxer: run\n")
 	for {
@@ -30,7 +32,11 @@ func (dm *demuxer) run() {
 				dm.stopped <- struct{}{}
 				return
 			}
-			oEvents := dm.handle(event)
+			oEvents, err := dm.handle(event)
+			if err != nil {
+				// TODO Termination time
+				return
+			}
 			for _, event := range oEvents {
 				dm.eventbus <- event
 			}
@@ -38,9 +44,12 @@ func (dm *demuxer) run() {
 			if !ok {
 				fmt.Printf("demuxer: scheduler output closed\n")
 				continue
-				// todo: close?
 			}
-			oEvents := dm.handle(event)
+			oEvents, err := dm.handle(event)
+			if err != nil {
+				// TODO tTermination time
+				return
+			}
 			for _, event := range oEvents {
 				dm.eventbus <- event
 			}
@@ -48,39 +57,35 @@ func (dm *demuxer) run() {
 			if !ok {
 				fmt.Printf("demuxer: processor output closed\n")
 				continue
-				// todo: close?
 			}
-			oEvents := dm.handle(event)
+			oEvents, err := dm.handle(event)
+			if err != nil {
+				// TODO tTermination time
+				return
+			}
 			for _, event := range oEvents {
 				dm.eventbus <- event
 			}
+		case err := <-dm.scheduler.finished:
+			dm.finished <- err
+		case err := <-dm.processor.finished:
+			dm.finished <- err
 		}
 	}
 }
 
-// XXX: What is the corerct behaviour here?
-// onPcFinish, process no further events
-// OR onPcFinish, process all queued events and then close
-func (dm *demuxer) handle(event Event) Events {
-	switch event.(type) {
-	case pcFinished:
-		// dm.stop()
-		fmt.Println("demuxer received pcFinished")
-		dm.finished <- struct{}{}
-	default:
-		received := dm.scheduler.send(event)
-		if !received {
-			return Events{scFull{}} // backpressure
-		}
-
-		received = dm.processor.send(event)
-		if !received {
-			return Events{pcFull{}} // backpressure
-		}
-
-		return Events{}
+func (dm *demuxer) handle(event Event) (Events, error) {
+	received := dm.scheduler.send(event)
+	if !received {
+		return Events{scFull{}}, nil // backpressure
 	}
-	return Events{}
+
+	received = dm.processor.send(event)
+	if !received {
+		return Events{pcFull{}}, nil // backpressure
+	}
+
+	return Events{}, nil
 }
 
 func (dm *demuxer) send(event Event) bool {
@@ -98,4 +103,13 @@ func (dm *demuxer) stop() {
 	fmt.Printf("demuxer stop\n")
 	close(dm.eventbus)
 	<-dm.stopped
+	dm.terminate(fmt.Errorf("stopped"))
+}
+
+func (dm *demuxer) terminate(reason error) {
+	dm.finished <- reason
+}
+
+func (dm *demuxer) wait() error {
+	return <-dm.finished
 }
