@@ -3,20 +3,23 @@ package v2
 import (
 	"fmt"
 	"sync/atomic"
+
+	"github.com/tendermint/tendermint/libs/log"
 )
 
 // TODO
-// logging
 // metrics
+// revisit panic conditions
+// audit log levels
+// maybe routine should be an interface and the concret tpe should be handlerRoutine
 
 type handleFunc = func(event Event) (Events, error)
 
-// XXX: This should comply with the BaseService interface
-// Routine
 type Routine struct {
 	name     string
 	input    chan Event
 	errors   chan error
+	logger   log.Logger
 	output   chan Event
 	stopped  chan struct{}
 	finished chan error
@@ -24,21 +27,25 @@ type Routine struct {
 	handle   handleFunc
 }
 
-func newRoutine(name string, output chan Event, handleFunc handleFunc) *Routine {
+func newRoutine(name string, output chan Event, handleFunc handleFunc, logger log.Logger) *Routine {
+	if logger == nil {
+		logger = log.NewNopLogger()
+	}
 	return &Routine{
 		name:     name,
 		input:    make(chan Event, 1),
+		handle:   handleFunc,
+		logger:   logger,
 		errors:   make(chan error, 1),
 		output:   output,
 		stopped:  make(chan struct{}, 1),
 		finished: make(chan error, 1),
 		running:  new(uint32),
-		handle:   handleFunc,
 	}
 }
 
 func (rt *Routine) run() {
-	fmt.Printf("%s: run\n", rt.name)
+	rt.logger.Info(fmt.Sprintf("%s: run\n", rt.name))
 	starting := atomic.CompareAndSwapUint32(rt.running, uint32(0), uint32(1))
 	if !starting {
 		panic("Routine has already started")
@@ -54,7 +61,7 @@ func (rt *Routine) run() {
 				if !errorsDrained {
 					continue // wait for errors to be drainned
 				}
-				fmt.Printf("%s: stopping\n", rt.name)
+				rt.logger.Info(fmt.Sprintf("%s: stopping\n", rt.name))
 				rt.stopped <- struct{}{}
 				return
 			}
@@ -64,24 +71,22 @@ func (rt *Routine) run() {
 				return
 			}
 
-			fmt.Printf("%s handled %d events\n", rt.name, len(oEvents))
+			rt.logger.Info(fmt.Sprintf("%s handled %d events\n", rt.name, len(oEvents)))
 			for _, event := range oEvents {
-				fmt.Println("writting back to output")
+				rt.logger.Info(fmt.Sprintln("writting back to output"))
 				rt.output <- event
 			}
 		case iEvent, ok := <-rt.errors:
 			if !ok {
-				fmt.Printf("%s: errors closed\n", rt.name)
+				rt.logger.Info(fmt.Sprintf("%s: errors closed\n", rt.name))
 				errorsDrained = true
 				continue
 			}
-			// rename flush?
 			oEvents, err := rt.handle(iEvent)
 			if err != nil {
 				rt.terminate(err)
 				return
 			}
-			fmt.Printf("%s handled %d events from errors\n", rt.name, len(oEvents))
 			for _, event := range oEvents {
 				rt.output <- event
 			}
@@ -95,14 +100,12 @@ func (rt *Routine) feedback() {
 }
 
 func (rt *Routine) send(event Event) bool {
-	fmt.Printf("%s: send\n", rt.name)
-	// XXX: What if we arn't running? this will panic
 	if err, ok := event.(error); ok {
 		select {
 		case rt.errors <- err:
 			return true
 		default:
-			fmt.Printf("%s: errors channel was full\n", rt.name)
+			rt.logger.Info(fmt.Sprintf("%s: errors channel was full\n", rt.name))
 			return false
 		}
 	} else {
@@ -110,7 +113,7 @@ func (rt *Routine) send(event Event) bool {
 		case rt.input <- event:
 			return true
 		default:
-			fmt.Printf("%s: channel was full\n", rt.name)
+			rt.logger.Info(fmt.Sprintf("%s: channel was full\n", rt.name))
 			return false
 		}
 	}
@@ -122,10 +125,11 @@ func (rt *Routine) isRunning() bool {
 
 // rename flush?
 func (rt *Routine) stop() {
-	fmt.Printf("%s: stop\n", rt.name)
+	// XXX: what if already stopped?
+	rt.logger.Info(fmt.Sprintf("%s: stop\n", rt.name))
 	close(rt.input)
 	close(rt.errors)
-	<-rt.stopped // stuck here
+	<-rt.stopped
 	rt.terminate(fmt.Errorf("routine stopped"))
 }
 
