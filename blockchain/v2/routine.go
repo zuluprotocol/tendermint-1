@@ -8,23 +8,25 @@ import (
 )
 
 // TODO
-// metrics
-// revisit panic conditions
-// audit log levels
-// maybe routine should be an interface and the concret tpe should be handlerRoutine
+// * revisit panic conditions
+// * audit log levels
+// * maybe routine should be an interface and the concret tpe should be handlerRoutine
 
+// Adding Metrics
+// we need a metrics definition
 type handleFunc = func(event Event) (Events, error)
 
 type Routine struct {
 	name     string
 	input    chan Event
 	errors   chan error
-	logger   log.Logger
 	output   chan Event
 	stopped  chan struct{}
 	finished chan error
 	running  *uint32
 	handle   handleFunc
+	logger   log.Logger
+	metrics  *Metrics
 }
 
 func newRoutine(name string, output chan Event, handleFunc handleFunc) *Routine {
@@ -38,11 +40,16 @@ func newRoutine(name string, output chan Event, handleFunc handleFunc) *Routine 
 		finished: make(chan error, 1),
 		running:  new(uint32),
 		logger:   log.NewNopLogger(),
+		metrics:  NopMetrics(),
 	}
 }
 
 func (rt *Routine) setLogger(logger log.Logger) {
 	rt.logger = logger
+}
+
+func (rt *Routine) setMetrics(metrics *Metrics) {
+	rt.metrics = metrics
 }
 
 func (rt *Routine) run() {
@@ -58,6 +65,7 @@ func (rt *Routine) run() {
 		}
 		select {
 		case iEvent, ok := <-rt.input:
+			rt.metrics.EventsIn.With("routine", rt.name).Add(1)
 			if !ok {
 				if !errorsDrained {
 					continue // wait for errors to be drainned
@@ -67,27 +75,31 @@ func (rt *Routine) run() {
 				return
 			}
 			oEvents, err := rt.handle(iEvent)
+			rt.metrics.EventsHandled.With("routine", rt.name).Add(1)
 			if err != nil {
 				rt.terminate(err)
 				return
 			}
-
+			rt.metrics.EventsOut.With("routine", rt.name).Add(float64(len(oEvents)))
 			rt.logger.Info(fmt.Sprintf("%s handled %d events\n", rt.name, len(oEvents)))
 			for _, event := range oEvents {
 				rt.logger.Info(fmt.Sprintln("writting back to output"))
 				rt.output <- event
 			}
 		case iEvent, ok := <-rt.errors:
+			rt.metrics.ErrorsIn.With("routine", rt.name).Add(1)
 			if !ok {
 				rt.logger.Info(fmt.Sprintf("%s: errors closed\n", rt.name))
 				errorsDrained = true
 				continue
 			}
 			oEvents, err := rt.handle(iEvent)
+			rt.metrics.ErrorsHandled.With("routine", rt.name).Add(1)
 			if err != nil {
 				rt.terminate(err)
 				return
 			}
+			rt.metrics.ErrorsOut.With("routine", rt.name).Add(float64(len(oEvents)))
 			for _, event := range oEvents {
 				rt.output <- event
 			}
@@ -104,16 +116,20 @@ func (rt *Routine) send(event Event) bool {
 	if err, ok := event.(error); ok {
 		select {
 		case rt.errors <- err:
+			rt.metrics.ErrorsSent.With("routine", rt.name).Add(1)
 			return true
 		default:
+			rt.metrics.ErrorsShed.With("routine", rt.name).Add(1)
 			rt.logger.Info(fmt.Sprintf("%s: errors channel was full\n", rt.name))
 			return false
 		}
 	} else {
 		select {
 		case rt.input <- event:
+			rt.metrics.EventsSent.With("routine", rt.name).Add(1)
 			return true
 		default:
+			rt.metrics.EventsShed.With("routine", rt.name).Add(1)
 			rt.logger.Info(fmt.Sprintf("%s: channel was full\n", rt.name))
 			return false
 		}
