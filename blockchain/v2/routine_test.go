@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"testing"
 	"time"
-
-	"github.com/tendermint/tendermint/libs/log"
 )
 
 type eventA struct{}
@@ -25,7 +23,7 @@ func simpleHandler(event Event) (Events, error) {
 
 func TestRoutine(t *testing.T) {
 	events := make(chan Event, 10)
-	routine := newRoutine("simpleRoutine", events, simpleHandler, log.TestingLogger())
+	routine := newRoutine("simpleRoutine", events, simpleHandler)
 
 	go routine.run()
 	go routine.feedback()
@@ -54,7 +52,7 @@ func genStatefulHandler(maxCount int) handleFunc {
 func TestStatefulRoutine(t *testing.T) {
 	events := make(chan Event, 10)
 	handler := genStatefulHandler(10)
-	routine := newRoutine("statefulRoutine", events, handler, log.TestingLogger())
+	routine := newRoutine("statefulRoutine", events, handler)
 
 	go routine.run()
 	go routine.feedback()
@@ -76,7 +74,7 @@ func handleWithErrors(event Event) (Events, error) {
 
 func TestErrorSaturation(t *testing.T) {
 	events := make(chan Event, 10)
-	routine := newRoutine("errorRoutine", events, handleWithErrors, log.TestingLogger())
+	routine := newRoutine("errorRoutine", events, handleWithErrors)
 
 	go routine.run()
 	go func() {

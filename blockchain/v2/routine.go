@@ -27,21 +27,22 @@ type Routine struct {
 	handle   handleFunc
 }
 
-func newRoutine(name string, output chan Event, handleFunc handleFunc, logger log.Logger) *Routine {
-	if logger == nil {
-		logger = log.NewNopLogger()
-	}
+func newRoutine(name string, output chan Event, handleFunc handleFunc) *Routine {
 	return &Routine{
 		name:     name,
 		input:    make(chan Event, 1),
 		handle:   handleFunc,
-		logger:   logger,
 		errors:   make(chan error, 1),
 		output:   output,
 		stopped:  make(chan struct{}, 1),
 		finished: make(chan error, 1),
 		running:  new(uint32),
+		logger:   log.NewNopLogger(),
 	}
+}
+
+func (rt *Routine) setLogger(logger log.Logger) {
+	rt.logger = logger
 }
 
 func (rt *Routine) run() {

@@ -3,8 +3,6 @@ package v2
 import (
 	"fmt"
 	"time"
-
-	"github.com/tendermint/tendermint/libs/log"
 )
 
 func schedulerHandle(event Event) (Events, error) {
@@ -45,8 +43,8 @@ func (r *Reactor) Start() {
 	bufferSize := 10
 	events := make(chan Event, bufferSize)
 
-	r.scheduler = newRoutine("scheduler", events, schedulerHandle, log.TestingLogger())
-	r.processor = newRoutine("processor", events, processorHandle, log.TestingLogger())
+	r.scheduler = newRoutine("scheduler", events, schedulerHandle)
+	r.processor = newRoutine("processor", events, processorHandle)
 	r.demuxer = newDemuxer(r.scheduler, r.processor)
 	r.tickerStopped = make(chan struct{})
 
