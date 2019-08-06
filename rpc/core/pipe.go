@@ -160,7 +160,7 @@ func validatePage(page, perPage, totalCount int) (int, error) {
 		pages = 1 // one page (even if it's empty)
 	}
 	if page < 0 || page > pages {
-		return 1, fmt.Errorf("page should be within [0, %d] range, given %d", pages, page)
+		return 1, fmt.Errorf("page should be within [1, %d] range, given %d", pages, page)
 	}
 
 	return page, nil
