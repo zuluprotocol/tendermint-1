@@ -19,8 +19,8 @@ program](https://hackerone.com/tendermint).
 
 ### IMPROVEMENTS:
 
-- [privval] \#3370 Refactors and simplifies validator/kms connection handling. Please refer to thttps://github.com/tendermint/tendermint/pull/3370#issue-257360971
 - [consensus] \#3839 Reduce "Error attempting to add vote" message severity (Error -> Info)
+- [privval] \#3370 Refactors and simplifies validator/kms connection handling. Please refer to [this comment](https://github.com/tendermint/tendermint/pull/3370#issue-257360971) for details.
 
 ### BUG FIXES:
 
