@@ -148,7 +148,7 @@ of O(C) goroutines per O(P) peers is still O(C\*P=constant).
   * Use defer statements to unlock as much as possible.  If you want to unlock sooner,
     try to create more modular functions that do make use of defer statements.
 
-## Matras
+## Mantras
 
 * Premature optimization kills
 * Readability is paramount
