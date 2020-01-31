@@ -6,8 +6,8 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/behaviour"
 	cfg "github.com/tendermint/tendermint/config"
-	"github.com/tendermint/tendermint/libs/service"
 	"github.com/tendermint/tendermint/libs/log"
+	"github.com/tendermint/tendermint/libs/service"
 	"github.com/tendermint/tendermint/mock"
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/p2p/conn"
@@ -67,8 +67,8 @@ func (mp mockPeer) CloseConn() error   { return nil }
 
 func (mp mockPeer) NodeInfo() p2p.NodeInfo {
 	return p2p.DefaultNodeInfo{
-		DefaultNodeID:        "",
-		ListenAddr: "",
+		DefaultNodeID: "",
+		ListenAddr:    "",
 	}
 }
 func (mp mockPeer) Status() conn.ConnectionStatus { return conn.ConnectionStatus{} }
@@ -461,24 +461,6 @@ type testApp struct {
 	abci.BaseApplication
 }
 
-func makeVote(header *types.Header, blockID types.BlockID, valset *types.ValidatorSet, privVal types.PrivValidator) *types.Vote {
-	addr := privVal.GetPubKey().Address()
-	idx, _ := valset.GetByAddress(addr)
-	vote := &types.Vote{
-		ValidatorAddress: addr,
-		ValidatorIndex:   idx,
-		Height:           header.Height,
-		Round:            1,
-		Timestamp:        tmtime.Now(),
-		Type:             types.PrecommitType,
-		BlockID:          blockID,
-	}
-
-	_ = privVal.SignVote(header.ChainID, vote)
-
-	return vote
-}
-
 func randGenesisDoc(chainID string, numValidators int, randPower bool, minPower int64) (*types.GenesisDoc, []types.PrivValidator) {
 	validators := make([]types.GenesisValidator, numValidators)
 	privValidators := make([]types.PrivValidator, numValidators)
@@ -529,13 +511,23 @@ func newReactorStore(
 
 	// add blocks in
 	for blockHeight := int64(1); blockHeight <= maxBlockHeight; blockHeight++ {
-		lastCommit := types.NewCommit(blockHeight, int(0), types.BlockID{}, nil)
+		lastCommit := types.NewCommit(blockHeight-1, 0, types.BlockID{}, nil)
+
 		if blockHeight > 1 {
 			lastBlockMeta := blockStore.LoadBlockMeta(blockHeight - 1)
 			lastBlock := blockStore.LoadBlock(blockHeight - 1)
 
-			vote := makeVote(&lastBlock.Header, lastBlockMeta.BlockID, state.Validators, privVals[0]).CommitSig()
-			lastCommit = types.NewCommit(blockHeight, int(0), lastBlockMeta.BlockID, []types.CommitSig{vote})
+			vote, err := types.MakeVote(
+				lastBlock.Header.Height,
+				lastBlockMeta.BlockID,
+				state.Validators,
+				privVals[0],
+				lastBlock.Header.ChainID)
+			if err != nil {
+				panic(err)
+			}
+			lastCommit = types.NewCommit(vote.Height, vote.Round,
+				lastBlockMeta.BlockID, []types.CommitSig{vote.CommitSig()})
 		}
 
 		thisBlock := makeBlock(blockHeight, state, lastCommit)
