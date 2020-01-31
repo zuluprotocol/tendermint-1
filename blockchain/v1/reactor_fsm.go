@@ -144,7 +144,7 @@ var (
 
 // timeouts for state timers
 const (
-	waitForPeerTimeout                 = 60 * time.Second
+	waitForPeerTimeout                 = 3 * time.Second
 	waitForBlockAtCurrentHeightTimeout = 10 * time.Second
 )
 
