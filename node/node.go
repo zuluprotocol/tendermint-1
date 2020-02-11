@@ -41,6 +41,7 @@ import (
 	"github.com/tendermint/tendermint/state/txindex"
 	"github.com/tendermint/tendermint/state/txindex/kv"
 	"github.com/tendermint/tendermint/state/txindex/null"
+	"github.com/tendermint/tendermint/statesync"
 	"github.com/tendermint/tendermint/store"
 	"github.com/tendermint/tendermint/types"
 	tmtime "github.com/tendermint/tendermint/types/time"
@@ -151,6 +152,7 @@ type Option func(*Node)
 //  - CONSENSUS
 //  - EVIDENCE
 //  - PEX
+//  - STATESYNC
 func CustomReactors(reactors map[string]p2p.Reactor) Option {
 	return func(n *Node) {
 		for name, reactor := range reactors {
@@ -191,12 +193,13 @@ type Node struct {
 	bcReactor        p2p.Reactor       // for fast-syncing
 	mempoolReactor   *mempl.Reactor    // for gossipping transactions
 	mempool          mempl.Mempool
-	consensusState   *cs.State      // latest consensus state
-	consensusReactor *cs.Reactor    // for participating in the consensus
-	pexReactor       *pex.Reactor   // for exchanging peer addresses
-	evidencePool     *evidence.Pool // tracking evidence
-	proxyApp         proxy.AppConns // connection to the application
-	rpcListeners     []net.Listener // rpc servers
+	consensusState   *cs.State          // latest consensus state
+	consensusReactor *cs.Reactor        // for participating in the consensus
+	pexReactor       *pex.Reactor       // for exchanging peer addresses
+	stateSyncReactor *statesync.Reactor // for managing state sync
+	evidencePool     *evidence.Pool     // tracking evidence
+	proxyApp         proxy.AppConns     // connection to the application
+	rpcListeners     []net.Listener     // rpc servers
 	txIndexer        txindex.TxIndexer
 	indexerService   *txindex.IndexerService
 	prometheusSrv    *http.Server
@@ -373,6 +376,12 @@ func createBlockchainReactor(config *cfg.Config,
 	return bcReactor, nil
 }
 
+func createStateSyncReactor(config *cfg.Config, logger log.Logger) (*statesync.Reactor, error) {
+	reactor := statesync.NewReactor(config.StateSync)
+	reactor.SetLogger(logger.With("module", "statesync"))
+	return reactor, nil
+}
+
 func createConsensusReactor(config *cfg.Config,
 	state sm.State,
 	blockExec *sm.BlockExecutor,
@@ -476,6 +485,7 @@ func createSwitch(config *cfg.Config,
 	peerFilters []p2p.PeerFilterFunc,
 	mempoolReactor *mempl.Reactor,
 	bcReactor p2p.Reactor,
+	stateSyncReactor p2p.Reactor,
 	consensusReactor *consensus.Reactor,
 	evidenceReactor *evidence.Reactor,
 	nodeInfo p2p.NodeInfo,
@@ -491,6 +501,7 @@ func createSwitch(config *cfg.Config,
 	sw.SetLogger(p2pLogger)
 	sw.AddReactor("MEMPOOL", mempoolReactor)
 	sw.AddReactor("BLOCKCHAIN", bcReactor)
+	sw.AddReactor("STATESYNC", stateSyncReactor)
 	sw.AddReactor("CONSENSUS", consensusReactor)
 	sw.AddReactor("EVIDENCE", evidenceReactor)
 
@@ -652,6 +663,12 @@ func NewNode(config *cfg.Config,
 		return nil, errors.Wrap(err, "could not create blockchain reactor")
 	}
 
+	// Make StateSyncReactor
+	stateSyncReactor, err := createStateSyncReactor(config, logger)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not create state sync reactor")
+	}
+
 	// Make ConsensusReactor
 	consensusReactor, consensusState := createConsensusReactor(
 		config, state, blockExec, blockStore, mempool, evidencePool,
@@ -670,7 +687,7 @@ func NewNode(config *cfg.Config,
 	p2pLogger := logger.With("module", "p2p")
 	sw := createSwitch(
 		config, transport, p2pMetrics, peerFilters, mempoolReactor, bcReactor,
-		consensusReactor, evidenceReactor, nodeInfo, nodeKey, p2pLogger,
+		stateSyncReactor, consensusReactor, evidenceReactor, nodeInfo, nodeKey, p2pLogger,
 	)
 
 	err = sw.AddPersistentPeers(splitAndTrimEmpty(config.P2P.PersistentPeers, ",", " "))
@@ -730,6 +747,7 @@ func NewNode(config *cfg.Config,
 		consensusState:   consensusState,
 		consensusReactor: consensusReactor,
 		pexReactor:       pexReactor,
+		stateSyncReactor: stateSyncReactor,
 		evidencePool:     evidencePool,
 		proxyApp:         proxyApp,
 		txIndexer:        txIndexer,
@@ -1109,6 +1127,7 @@ func makeNodeInfo(
 			cs.StateChannel, cs.DataChannel, cs.VoteChannel, cs.VoteSetBitsChannel,
 			mempl.MempoolChannel,
 			evidence.EvidenceChannel,
+			statesync.MetadataChannel, statesync.ChunkChannel,
 		},
 		Moniker: config.Moniker,
 		Other: p2p.DefaultNodeInfoOther{
