@@ -246,7 +246,8 @@ message ResponseListSnapshots {
 
 message ResponseOfferSnapshot {
   bool accepted = 1;
-  enum reason {             // Reason why snapshot was rejected
+  Reason reason = 2;
+  enum Reason {             // Reason why snapshot was rejected
       unknown = 0;          // Unknown or generic reason
       invalid_height = 1;   // Height is rejected: avoid this height
       invalid_format = 2;   // Format is rejected: avoid this format
@@ -259,7 +260,8 @@ message ResponseGetSnapshotChunk {
 
 message ResponseApplySnapshotChunk {
   bool applied = 1;
-  enum reason {           // Reason why chunk failed
+  Reason reason = 2;
+  enum Reason {           // Reason why chunk failed
       unknown = 0;        // Unknown or generic reason
       verify_failed = 1;  // Chunk verification failed
   }
