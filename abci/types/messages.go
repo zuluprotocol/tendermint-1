@@ -135,6 +135,30 @@ func ToRequestEndBlock(req RequestEndBlock) *Request {
 	}
 }
 
+func ToRequestListSnapshots(req RequestListSnapshots) *Request {
+	return &Request{
+		Value: &Request_ListSnapshots{&req},
+	}
+}
+
+func ToRequestOfferSnapshot(req RequestOfferSnapshot) *Request {
+	return &Request{
+		Value: &Request_OfferSnapshot{&req},
+	}
+}
+
+func ToRequestGetSnapshotChunk(req RequestGetSnapshotChunk) *Request {
+	return &Request{
+		Value: &Request_GetSnapshotChunk{&req},
+	}
+}
+
+func ToRequestApplySnapshotChunk(req RequestApplySnapshotChunk) *Request {
+	return &Request{
+		Value: &Request_ApplySnapshotChunk{&req},
+	}
+}
+
 //----------------------------------------
 
 func ToResponseException(errStr string) *Response {
