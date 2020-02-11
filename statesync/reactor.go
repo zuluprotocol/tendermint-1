@@ -7,8 +7,10 @@ import (
 	"github.com/pkg/errors"
 
 	amino "github.com/tendermint/go-amino"
+	"github.com/tendermint/tendermint/abci/types"
 	cfg "github.com/tendermint/tendermint/config"
 	"github.com/tendermint/tendermint/p2p"
+	"github.com/tendermint/tendermint/proxy"
 )
 
 const (
@@ -26,12 +28,14 @@ const (
 type Reactor struct {
 	p2p.BaseReactor
 	config *cfg.StateSyncConfig
+	conn   proxy.AppConnSnapshot
 }
 
 // NewReactor returns a new state sync reactor.
-func NewReactor(config *cfg.StateSyncConfig) *Reactor {
+func NewReactor(config *cfg.StateSyncConfig, conn proxy.AppConnSnapshot) *Reactor {
 	ssR := &Reactor{
 		config: config,
+		conn:   conn,
 	}
 	ssR.BaseReactor = *p2p.NewBaseReactor("StateSyncReactor", ssR)
 	return ssR
@@ -89,11 +93,25 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 	case MetadataChannel:
 		switch msg := msg.(type) {
 		case *ListSnapshotsRequestMessage:
+			resp, err := ssR.conn.ListSnapshotsSync(types.RequestListSnapshots{})
+			if err != nil {
+				ssR.Logger.Error("Failed to list snapshots", "err", err)
+				return
+			}
+			snapshots := make([]Snapshot, 0, len(resp.Snapshots))
+			for _, snapshot := range resp.Snapshots {
+				snapshots = append(snapshots, Snapshot{
+					Height:   snapshot.Height,
+					Format:   snapshot.Format,
+					Chunks:   snapshot.Chunks,
+					Metadata: snapshot.Metadata,
+				})
+			}
 			src.Send(MetadataChannel, cdc.MustMarshalBinaryBare(&ListSnapshotsResponseMessage{
-				Snapshots: make([]Snapshot, 0),
+				Snapshots: snapshots,
 			}))
 		case *ListSnapshotsResponseMessage:
-			ssR.Logger.Info(fmt.Sprintf("Received snapshots: %v", msg.Snapshots))
+			ssR.Logger.Info(fmt.Sprintf("Received snapshots: %v", msg.Snapshots), "peer", src.ID())
 		}
 	case ChunkChannel:
 	}
@@ -142,6 +160,7 @@ func RegisterMessages(cdc *amino.Codec) {
 	cdc.RegisterConcrete(&ListSnapshotsResponseMessage{}, "tendermint/ListSnapshotsResponseMessage", nil)
 }
 
+// FIXME This should possibly be in /types/
 type Snapshot struct {
 	Height   uint64
 	Format   uint32
