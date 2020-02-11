@@ -1,8 +1,10 @@
 package statesync
 
 import (
+	// nolint: gosec
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -30,6 +32,11 @@ type Reactor struct {
 	p2p.BaseReactor
 	config *cfg.StateSyncConfig
 	conn   proxy.AppConnSnapshot
+
+	mtxRestore sync.Mutex
+	restoring  *Snapshot
+	nextChunk  uint64
+	source     *p2p.Peer
 }
 
 // NewReactor returns a new state sync reactor.
@@ -113,6 +120,11 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				Snapshots: snapshots,
 			}))
 		case *ListSnapshotsResponseMessage:
+			ssR.mtxRestore.Lock()
+			defer ssR.mtxRestore.Unlock()
+			if ssR.restoring != nil {
+				return
+			}
 			ssR.Logger.Info(fmt.Sprintf("Received %v snapshots", len(msg.Snapshots)), "peer", src.ID())
 			if len(msg.Snapshots) == 0 {
 				return
@@ -145,11 +157,98 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				}
 				if resp.Accepted {
 					ssR.Logger.Info("Accepted snapshot", "height", snapshot.Height, "format", snapshot.Format)
+					s := snapshot
+					ssR.restoring = &s
+					ssR.source = &src
+					ssR.nextChunk = 1
+					ssR.Logger.Info("Fetching snapshot chunk", "peer", src.ID(), "chunk", ssR.nextChunk)
+					(*ssR.source).Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkRequestMessage{
+						Height: snapshot.Height,
+						Format: snapshot.Format,
+						Chunk:  1,
+					}))
 					break
 				}
 			}
 		}
 	case ChunkChannel:
+		switch msg := msg.(type) {
+		case *GetSnapshotChunkRequestMessage:
+			ssR.Logger.Info("Providing snapshot chunk", "height", msg.Height, "format", msg.Format, "chunk", msg.Chunk)
+			resp, err := ssR.conn.GetSnapshotChunkSync(types.RequestGetSnapshotChunk{
+				Height: msg.Height,
+				Format: msg.Format,
+				Chunk:  msg.Chunk,
+			})
+			if err != nil {
+				panic(err)
+			}
+			if resp.Chunk == nil {
+				panic("No chunk")
+			}
+			// FIXME Verify checksum
+			src.Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkResponseMessage{
+				// FIXME Conversion
+				Chunk: SnapshotChunk{
+					Height:   resp.Chunk.Height,
+					Format:   resp.Chunk.Format,
+					Chunk:    resp.Chunk.Chunk,
+					Data:     resp.Chunk.Data,
+					Checksum: resp.Chunk.Checksum,
+				},
+			}))
+
+		case *GetSnapshotChunkResponseMessage:
+			ssR.mtxRestore.Lock()
+			defer ssR.mtxRestore.Unlock()
+			if ssR.restoring == nil {
+				ssR.Logger.Error("Received chunk with no restore in progress")
+				return
+			}
+			if msg.Chunk.Height != ssR.restoring.Height {
+				ssR.Logger.Error("Received chunk for other height")
+				return
+			}
+			if msg.Chunk.Format != ssR.restoring.Format {
+				ssR.Logger.Error("Received chunk for other format")
+				return
+			}
+			if msg.Chunk.Chunk != ssR.nextChunk {
+				ssR.Logger.Error(fmt.Sprintf("Received chunk %v, expected %v", msg.Chunk.Chunk, ssR.nextChunk))
+				return
+			}
+			// FIXME Verify checksum
+			ssR.Logger.Info(fmt.Sprintf("Applying chunk %v", msg.Chunk.Chunk))
+			resp, err := ssR.conn.ApplySnapshotChunkSync(types.RequestApplySnapshotChunk{
+				// FIXME Conversion
+				Chunk: &types.SnapshotChunk{
+					Height:   msg.Chunk.Height,
+					Format:   msg.Chunk.Format,
+					Chunk:    msg.Chunk.Chunk,
+					Data:     msg.Chunk.Data,
+					Checksum: msg.Chunk.Checksum,
+				},
+			})
+			if err != nil {
+				panic(err)
+			}
+			if !resp.Applied {
+				// FIXME Retry from different peer or something
+				ssR.Logger.Error(fmt.Sprintf("Failed to apply chunk %v", msg.Chunk.Chunk))
+				return
+			}
+			ssR.nextChunk++
+			if ssR.nextChunk >= ssR.restoring.Chunks {
+				ssR.Logger.Info("Restore complete")
+				return
+			}
+			ssR.Logger.Info("Fetching snapshot chunk", "peer", src.ID(), "chunk", ssR.nextChunk)
+			(*ssR.source).Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkRequestMessage{
+				Height: ssR.restoring.Height,
+				Format: ssR.restoring.Format,
+				Chunk:  ssR.nextChunk,
+			}))
+		}
 	}
 }
 
@@ -157,15 +256,15 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 func (ssR *Reactor) AddPeer(peer p2p.Peer) {
 	ssR.Logger.Info(fmt.Sprintf("Found peer %q", peer.NodeInfo().ID()))
 	go func() {
-		for {
-			ssR.Logger.Info(fmt.Sprintf("Requesting snapshots from to %v", peer.ID()))
+		for peer.IsRunning() && ssR.restoring == nil {
+			ssR.Logger.Info(fmt.Sprintf("Requesting snapshots from %q", peer.ID()))
 			res := peer.Send(MetadataChannel, cdc.MustMarshalBinaryBare(&ListSnapshotsRequestMessage{}))
 			if !res {
 				ssR.Logger.Error("Failed to send message", "peer", peer.ID())
 			}
 			time.Sleep(10 * time.Second)
 		}
-
+		ssR.Logger.Info(fmt.Sprintf("No longer soliciting snapshots from %q", peer.ID()))
 	}()
 }
 
@@ -194,6 +293,8 @@ func RegisterMessages(cdc *amino.Codec) {
 	cdc.RegisterInterface((*Message)(nil), nil)
 	cdc.RegisterConcrete(&ListSnapshotsRequestMessage{}, "tendermint/ListSnapshotsRequestMessage", nil)
 	cdc.RegisterConcrete(&ListSnapshotsResponseMessage{}, "tendermint/ListSnapshotsResponseMessage", nil)
+	cdc.RegisterConcrete(&GetSnapshotChunkRequestMessage{}, "tendermint/GetSnapshotChunkRequestMessage", nil)
+	cdc.RegisterConcrete(&GetSnapshotChunkResponseMessage{}, "tendermint/GetSnapshotChunkResponseMessage", nil)
 }
 
 // FIXME This should possibly be in /types/
@@ -210,6 +311,27 @@ func (s *Snapshot) ValidateBasic() error {
 	}
 	if s.Height == 0 {
 		return errors.New("snapshot height cannot be 0")
+	}
+	return nil
+}
+
+type SnapshotChunk struct {
+	Height   uint64
+	Format   uint32
+	Chunk    uint64
+	Data     []byte
+	Checksum []byte
+}
+
+func (c *SnapshotChunk) ValidateBasic() error {
+	if c == nil {
+		return errors.New("chunk cannot be nil")
+	}
+	if c.Height == 0 {
+		return errors.New("chunk height cannot be 0")
+	}
+	if c.Chunk == 0 {
+		return errors.New("chunk index cannot be 0")
 	}
 	return nil
 }
@@ -235,4 +357,34 @@ func (m *ListSnapshotsResponseMessage) ValidateBasic() error {
 		}
 	}
 	return nil
+}
+
+type GetSnapshotChunkRequestMessage struct {
+	Height uint64
+	Format uint32
+	Chunk  uint64
+}
+
+func (m *GetSnapshotChunkRequestMessage) ValidateBasic() error {
+	if m == nil {
+		return errors.New("nil message")
+	}
+	if m.Height == 0 {
+		return errors.New("height 0")
+	}
+	if m.Chunk == 0 {
+		return errors.New("chunk 0")
+	}
+	return nil
+}
+
+type GetSnapshotChunkResponseMessage struct {
+	Chunk SnapshotChunk
+}
+
+func (m *GetSnapshotChunkResponseMessage) ValidateBasic() error {
+	if m == nil {
+		return errors.New("chunk cannot be nil")
+	}
+	return m.Chunk.ValidateBasic()
 }
