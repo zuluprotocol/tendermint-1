@@ -112,7 +112,7 @@ message RequestListSnapshots {
 
 // offers a snapshot to the application
 message RequestOfferSnapshot {
-  repeated Snapshot snapshots = 1;
+  Snapshot snapshot = 1;
 }
 
 // fetches a snapshot chunk
