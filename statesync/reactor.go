@@ -2,6 +2,7 @@ package statesync
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/pkg/errors"
@@ -100,6 +101,7 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 			}
 			snapshots := make([]Snapshot, 0, len(resp.Snapshots))
 			for _, snapshot := range resp.Snapshots {
+				// FIXME Should have conversion function
 				snapshots = append(snapshots, Snapshot{
 					Height:   snapshot.Height,
 					Format:   snapshot.Format,
@@ -111,7 +113,41 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				Snapshots: snapshots,
 			}))
 		case *ListSnapshotsResponseMessage:
-			ssR.Logger.Info(fmt.Sprintf("Received snapshots: %v", msg.Snapshots), "peer", src.ID())
+			ssR.Logger.Info(fmt.Sprintf("Received %v snapshots", len(msg.Snapshots)), "peer", src.ID())
+			if len(msg.Snapshots) == 0 {
+				return
+			}
+			snapshots := msg.Snapshots
+			sort.Slice(snapshots, func(i, j int) bool {
+				a, b := snapshots[i], snapshots[j]
+				switch {
+				case a.Height < b.Height:
+					return false
+				case a.Height == b.Height && a.Format < b.Format:
+					return false
+				default:
+					return true
+				}
+			})
+			for _, snapshot := range snapshots {
+				ssR.Logger.Info("Offering snapshot", "height", snapshot.Height, "format", snapshot.Format)
+				resp, err := ssR.conn.OfferSnapshotSync(types.RequestOfferSnapshot{
+					// FIXME Should have conversion function
+					Snapshot: &types.Snapshot{
+						Height:   snapshot.Height,
+						Format:   snapshot.Format,
+						Chunks:   snapshot.Chunks,
+						Metadata: snapshot.Metadata,
+					},
+				})
+				if err != nil {
+					panic(err)
+				}
+				if resp.Accepted {
+					ssR.Logger.Info("Accepted snapshot", "height", snapshot.Height, "format", snapshot.Format)
+					break
+				}
+			}
 		}
 	case ChunkChannel:
 	}
