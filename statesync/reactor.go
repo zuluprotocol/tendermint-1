@@ -1,10 +1,9 @@
 package statesync
 
 import (
-	// nolint: gosec
+	"crypto/sha1" // nolint: gosec
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -32,11 +31,7 @@ type Reactor struct {
 	p2p.BaseReactor
 	config *cfg.StateSyncConfig
 	conn   proxy.AppConnSnapshot
-
-	mtxRestore sync.Mutex
-	restoring  *Snapshot
-	nextChunk  uint64
-	source     *p2p.Peer
+	sync   Sync
 }
 
 // NewReactor returns a new state sync reactor.
@@ -44,6 +39,7 @@ func NewReactor(config *cfg.StateSyncConfig, conn proxy.AppConnSnapshot) *Reacto
 	ssR := &Reactor{
 		config: config,
 		conn:   conn,
+		sync:   NewSync(conn),
 	}
 	ssR.BaseReactor = *p2p.NewBaseReactor("StateSyncReactor", ssR)
 	return ssR
@@ -120,9 +116,7 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				Snapshots: snapshots,
 			}))
 		case *ListSnapshotsResponseMessage:
-			ssR.mtxRestore.Lock()
-			defer ssR.mtxRestore.Unlock()
-			if ssR.restoring != nil {
+			if ssR.sync.IsActive() || ssR.sync.IsDone() {
 				return
 			}
 			ssR.Logger.Info(fmt.Sprintf("Received %v snapshots", len(msg.Snapshots)), "peer", src.ID())
@@ -143,32 +137,25 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 			})
 			for _, snapshot := range snapshots {
 				ssR.Logger.Info("Offering snapshot", "height", snapshot.Height, "format", snapshot.Format)
-				resp, err := ssR.conn.OfferSnapshotSync(types.RequestOfferSnapshot{
-					// FIXME Should have conversion function
-					Snapshot: &types.Snapshot{
-						Height:   snapshot.Height,
-						Format:   snapshot.Format,
-						Chunks:   snapshot.Chunks,
-						Metadata: snapshot.Metadata,
-					},
-				})
+				err := ssR.sync.Start(&snapshot)
 				if err != nil {
-					panic(err)
+					switch err {
+					case ErrSnapshotRejected, ErrSnapshotRejectedFormat, ErrSnapshotRejectedHeight:
+						ssR.Logger.Info("Rejected snapshot")
+						continue
+					default:
+						panic(err)
+					}
 				}
-				if resp.Accepted {
-					ssR.Logger.Info("Accepted snapshot", "height", snapshot.Height, "format", snapshot.Format)
-					s := snapshot
-					ssR.restoring = &s
-					ssR.source = &src
-					ssR.nextChunk = 1
-					ssR.Logger.Info("Fetching snapshot chunk", "peer", src.ID(), "chunk", ssR.nextChunk)
-					(*ssR.source).Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkRequestMessage{
-						Height: snapshot.Height,
-						Format: snapshot.Format,
-						Chunk:  1,
-					}))
-					break
-				}
+				height, format, chunk := ssR.sync.NextChunk()
+				ssR.Logger.Info("Accepted snapshot", "height", height, "format", format)
+				ssR.Logger.Info("Fetching snapshot chunk", "peer", src.ID(), "chunk", chunk)
+				src.Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkRequestMessage{
+					Height: height,
+					Format: format,
+					Chunk:  chunk,
+				}))
+				break
 			}
 		}
 	case ChunkChannel:
@@ -187,66 +174,34 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				panic("No chunk")
 			}
 			// FIXME Verify checksum
-			src.Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkResponseMessage{
-				// FIXME Conversion
-				Chunk: SnapshotChunk{
-					Height:   resp.Chunk.Height,
-					Format:   resp.Chunk.Format,
-					Chunk:    resp.Chunk.Chunk,
-					Data:     resp.Chunk.Data,
-					Checksum: resp.Chunk.Checksum,
-				},
-			}))
+			chunk := SnapshotChunk{
+				Height: resp.Chunk.Height,
+				Format: resp.Chunk.Format,
+				Chunk:  resp.Chunk.Chunk,
+				Data:   resp.Chunk.Data,
+			}
+			copy(chunk.Checksum[:], resp.Chunk.Checksum)
+			src.Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkResponseMessage{Chunk: chunk}))
 
 		case *GetSnapshotChunkResponseMessage:
-			ssR.mtxRestore.Lock()
-			defer ssR.mtxRestore.Unlock()
-			if ssR.restoring == nil {
+			if !ssR.sync.IsActive() {
 				ssR.Logger.Error("Received chunk with no restore in progress")
 				return
 			}
-			if msg.Chunk.Height != ssR.restoring.Height {
-				ssR.Logger.Error("Received chunk for other height")
-				return
-			}
-			if msg.Chunk.Format != ssR.restoring.Format {
-				ssR.Logger.Error("Received chunk for other format")
-				return
-			}
-			if msg.Chunk.Chunk != ssR.nextChunk {
-				ssR.Logger.Error(fmt.Sprintf("Received chunk %v, expected %v", msg.Chunk.Chunk, ssR.nextChunk))
-				return
-			}
-			// FIXME Verify checksum
 			ssR.Logger.Info(fmt.Sprintf("Applying chunk %v", msg.Chunk.Chunk))
-			resp, err := ssR.conn.ApplySnapshotChunkSync(types.RequestApplySnapshotChunk{
-				// FIXME Conversion
-				Chunk: &types.SnapshotChunk{
-					Height:   msg.Chunk.Height,
-					Format:   msg.Chunk.Format,
-					Chunk:    msg.Chunk.Chunk,
-					Data:     msg.Chunk.Data,
-					Checksum: msg.Chunk.Checksum,
-				},
-			})
+			err := ssR.sync.Apply(&msg.Chunk)
 			if err != nil {
 				panic(err)
 			}
-			if !resp.Applied {
-				// FIXME Retry from different peer or something
-				ssR.Logger.Error(fmt.Sprintf("Failed to apply chunk %v", msg.Chunk.Chunk))
-				return
-			}
-			ssR.nextChunk++
-			if ssR.nextChunk >= ssR.restoring.Chunks {
+			if ssR.sync.IsDone() {
 				ssR.Logger.Info("Restore complete")
 				return
 			}
-			ssR.Logger.Info("Fetching snapshot chunk", "peer", src.ID(), "chunk", ssR.nextChunk)
-			(*ssR.source).Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkRequestMessage{
-				Height: ssR.restoring.Height,
-				Format: ssR.restoring.Format,
-				Chunk:  ssR.nextChunk,
+			ssR.Logger.Info("Fetching snapshot chunk", "peer", src.ID(), "chunk", ssR.sync.nextChunk)
+			src.Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkRequestMessage{
+				Height: ssR.sync.snapshot.Height,
+				Format: ssR.sync.snapshot.Format,
+				Chunk:  ssR.sync.nextChunk,
 			}))
 		}
 	}
@@ -256,7 +211,7 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 func (ssR *Reactor) AddPeer(peer p2p.Peer) {
 	ssR.Logger.Info(fmt.Sprintf("Found peer %q", peer.NodeInfo().ID()))
 	go func() {
-		for peer.IsRunning() && ssR.restoring == nil {
+		for peer.IsRunning() && !ssR.sync.IsActive() && !ssR.sync.IsDone() {
 			ssR.Logger.Info(fmt.Sprintf("Requesting snapshots from %q", peer.ID()))
 			res := peer.Send(MetadataChannel, cdc.MustMarshalBinaryBare(&ListSnapshotsRequestMessage{}))
 			if !res {
@@ -315,12 +270,12 @@ func (s *Snapshot) ValidateBasic() error {
 	return nil
 }
 
-type SnapshotChunk struct {
+type SnapshotChunk struct { // nolint: go-lint
 	Height   uint64
-	Format   uint32
 	Chunk    uint64
+	Format   uint32
 	Data     []byte
-	Checksum []byte
+	Checksum [sha1.Size]byte
 }
 
 func (c *SnapshotChunk) ValidateBasic() error {
