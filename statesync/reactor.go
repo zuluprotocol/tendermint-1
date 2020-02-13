@@ -57,7 +57,7 @@ func (ssR *Reactor) OnStart() error {
 	}
 	// Start a timeout to move to fast sync if no sync starts within 5 seconds
 	go func() {
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 		if !ssR.sync.IsActive() && !ssR.sync.IsDone() {
 			// FIXME Only switch to fast sync if it is enabled, otherwise go straight to consensus
 			ssR.Logger.Info("Timed out looking for snapshots, starting fast sync")
@@ -312,9 +312,6 @@ func (c *SnapshotChunk) ValidateBasic() error {
 	if c.Height == 0 {
 		return errors.New("chunk height cannot be 0")
 	}
-	if c.Chunk == 0 {
-		return errors.New("chunk index cannot be 0")
-	}
 	return nil
 }
 
@@ -353,9 +350,6 @@ func (m *GetSnapshotChunkRequestMessage) ValidateBasic() error {
 	}
 	if m.Height == 0 {
 		return errors.New("height 0")
-	}
-	if m.Chunk == 0 {
-		return errors.New("chunk 0")
 	}
 	return nil
 }
