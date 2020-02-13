@@ -95,7 +95,7 @@ func (s *Sync) Start(snapshot *Snapshot) error {
 		}
 	}
 	s.snapshot = snapshot
-	s.nextChunk = 1
+	s.nextChunk = 0
 	return nil
 }
 
