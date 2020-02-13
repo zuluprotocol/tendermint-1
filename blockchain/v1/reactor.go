@@ -76,6 +76,7 @@ type BlockchainReactor struct {
 }
 
 // NewBlockchainReactor returns new reactor instance.
+// FIXME Needs to support state sync.
 func NewBlockchainReactor(state sm.State, blockExec *sm.BlockExecutor, store *store.BlockStore,
 	fastSync bool) *BlockchainReactor {
 

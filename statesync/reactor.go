@@ -10,6 +10,7 @@ import (
 
 	amino "github.com/tendermint/go-amino"
 	"github.com/tendermint/tendermint/abci/types"
+	bcRv0 "github.com/tendermint/tendermint/blockchain/v0"
 	cfg "github.com/tendermint/tendermint/config"
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/proxy"
@@ -29,17 +30,19 @@ const (
 // serving snapshots for peers doing state sync.
 type Reactor struct {
 	p2p.BaseReactor
-	config *cfg.StateSyncConfig
-	conn   proxy.AppConnSnapshot
-	sync   Sync
+	config  *cfg.StateSyncConfig
+	enabled bool
+	conn    proxy.AppConnSnapshot
+	sync    Sync
 }
 
 // NewReactor returns a new state sync reactor.
 func NewReactor(config *cfg.StateSyncConfig, conn proxy.AppConnSnapshot) *Reactor {
 	ssR := &Reactor{
-		config: config,
-		conn:   conn,
-		sync:   NewSync(conn),
+		config:  config,
+		enabled: config.Enabled,
+		conn:    conn,
+		sync:    NewSync(conn),
 	}
 	ssR.BaseReactor = *p2p.NewBaseReactor("StateSyncReactor", ssR)
 	return ssR
@@ -48,10 +51,25 @@ func NewReactor(config *cfg.StateSyncConfig, conn proxy.AppConnSnapshot) *Reacto
 // OnStart implements p2p.BaseReactor.
 func (ssR *Reactor) OnStart() error {
 	ssR.Logger.Info("Starting state sync reactor")
-	if !ssR.config.Enabled {
+	if !ssR.enabled {
 		ssR.Logger.Info("State sync disabled")
 		return nil
 	}
+	// Start a timeout to move to fast sync if no sync starts within 5 seconds
+	go func() {
+		time.Sleep(5 * time.Second)
+		if !ssR.sync.IsActive() && !ssR.sync.IsDone() {
+			// FIXME Only switch to fast sync if it is enabled, otherwise go straight to consensus
+			ssR.Logger.Info("Timed out looking for snapshots, starting fast sync")
+			ssR.enabled = false
+			if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
+				err := bcR.StartSync()
+				if err != nil {
+					ssR.Logger.Error("Failed to switch to fast sync", "err", err)
+				}
+			}
+		}
+	}()
 	return nil
 }
 
@@ -85,8 +103,8 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 		ssR.Switch.StopPeerForError(src, err)
 		return
 	}
-
-	if err = msg.ValidateBasic(); err != nil {
+	err = msg.ValidateBasic()
+	if err != nil {
 		ssR.Logger.Error("Peer sent us invalid msg", "peer", src, "msg", msg, "err", err)
 		ssR.Switch.StopPeerForError(src, err)
 		return
@@ -116,7 +134,7 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				Snapshots: snapshots,
 			}))
 		case *ListSnapshotsResponseMessage:
-			if ssR.sync.IsActive() || ssR.sync.IsDone() {
+			if !ssR.enabled || ssR.sync.IsActive() || ssR.sync.IsDone() {
 				return
 			}
 			ssR.Logger.Info(fmt.Sprintf("Received %v snapshots", len(msg.Snapshots)), "peer", src.ID())
@@ -184,6 +202,10 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 			src.Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkResponseMessage{Chunk: chunk}))
 
 		case *GetSnapshotChunkResponseMessage:
+			if !ssR.enabled {
+				ssR.Logger.Error("Received chunk while disabled")
+				return
+			}
 			if !ssR.sync.IsActive() {
 				ssR.Logger.Error("Received chunk with no restore in progress")
 				return
@@ -193,34 +215,39 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 			if err != nil {
 				panic(err)
 			}
-			if ssR.sync.IsDone() {
-				ssR.Logger.Info("Restore complete")
-				return
+			if height, format, chunk := ssR.sync.NextChunk(); height > 0 {
+				ssR.Logger.Info("Fetching snapshot chunk", "peer", src.ID(), "chunk", chunk)
+				src.Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkRequestMessage{
+					Height: height,
+					Format: format,
+					Chunk:  chunk,
+				}))
+			} else {
+				ssR.Logger.Info("Restore complete, switching to fast sync")
+				ssR.enabled = false
+				if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
+					err := bcR.StartSync()
+					if err != nil {
+						ssR.Logger.Error("Failed to switch to fast sync", "err", err)
+					}
+				}
 			}
-			ssR.Logger.Info("Fetching snapshot chunk", "peer", src.ID(), "chunk", ssR.sync.nextChunk)
-			src.Send(ChunkChannel, cdc.MustMarshalBinaryBare(&GetSnapshotChunkRequestMessage{
-				Height: ssR.sync.snapshot.Height,
-				Format: ssR.sync.snapshot.Format,
-				Chunk:  ssR.sync.nextChunk,
-			}))
 		}
 	}
 }
 
 // AddPeer implements Reactor
 func (ssR *Reactor) AddPeer(peer p2p.Peer) {
+	if !ssR.enabled {
+		return
+	}
+
 	ssR.Logger.Info(fmt.Sprintf("Found peer %q", peer.NodeInfo().ID()))
-	go func() {
-		for peer.IsRunning() && !ssR.sync.IsActive() && !ssR.sync.IsDone() {
-			ssR.Logger.Info(fmt.Sprintf("Requesting snapshots from %q", peer.ID()))
-			res := peer.Send(MetadataChannel, cdc.MustMarshalBinaryBare(&ListSnapshotsRequestMessage{}))
-			if !res {
-				ssR.Logger.Error("Failed to send message", "peer", peer.ID())
-			}
-			time.Sleep(10 * time.Second)
-		}
-		ssR.Logger.Info(fmt.Sprintf("No longer soliciting snapshots from %q", peer.ID()))
-	}()
+	ssR.Logger.Info(fmt.Sprintf("Requesting snapshots from %q", peer.ID()))
+	res := peer.Send(MetadataChannel, cdc.MustMarshalBinaryBare(&ListSnapshotsRequestMessage{}))
+	if !res {
+		ssR.Logger.Error("Failed to send message", "peer", peer.ID())
+	}
 }
 
 // RemovePeer implements Reactor

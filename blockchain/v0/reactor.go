@@ -64,6 +64,7 @@ type BlockchainReactor struct {
 	store     *store.BlockStore
 	pool      *BlockPool
 	fastSync  bool
+	stateSync bool
 
 	requestsCh <-chan BlockRequest
 	errorsCh   <-chan peerError
@@ -71,7 +72,7 @@ type BlockchainReactor struct {
 
 // NewBlockchainReactor returns new reactor instance.
 func NewBlockchainReactor(state sm.State, blockExec *sm.BlockExecutor, store *store.BlockStore,
-	fastSync bool) *BlockchainReactor {
+	fastSync bool, stateSync bool) *BlockchainReactor {
 
 	if state.LastBlockHeight != store.Height() {
 		panic(fmt.Sprintf("state (%v) and store (%v) height mismatch", state.LastBlockHeight,
@@ -95,6 +96,7 @@ func NewBlockchainReactor(state sm.State, blockExec *sm.BlockExecutor, store *st
 		store:        store,
 		pool:         pool,
 		fastSync:     fastSync,
+		stateSync:    stateSync,
 		requestsCh:   requestsCh,
 		errorsCh:     errorsCh,
 	}
@@ -110,13 +112,19 @@ func (bcR *BlockchainReactor) SetLogger(l log.Logger) {
 
 // OnStart implements service.Service.
 func (bcR *BlockchainReactor) OnStart() error {
-	if bcR.fastSync {
-		err := bcR.pool.Start()
-		if err != nil {
-			return err
-		}
-		go bcR.poolRoutine()
+	if bcR.fastSync && !bcR.stateSync {
+		bcR.StartSync()
 	}
+	return nil
+}
+
+// StartSync runs a fast sync. It is called either on start, or by the state sync reactor.
+func (bcR *BlockchainReactor) StartSync() error {
+	err := bcR.pool.Start()
+	if err != nil {
+		return err
+	}
+	go bcR.poolRoutine()
 	return nil
 }
 
