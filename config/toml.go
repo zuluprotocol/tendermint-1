@@ -322,6 +322,10 @@ max_tx_bytes = {{ .Mempool.MaxTxBytes }}
 # for the remaining blocks.
 enabled = {{ .StateSync.Enabled }}
 
+# Light client header height and hash, for state verification
+verify_height = {{ .StateSync.VerifyHeight }}
+verify_hash = "{{ .StateSync.VerifyHash }}"
+
 ##### fast sync configuration options #####
 [fastsync]
 

@@ -750,13 +750,17 @@ func (cfg *FastSyncConfig) ValidateBasic() error {
 
 // StateSyncConfig defines the configuration for the Tendermint state sync service
 type StateSyncConfig struct {
-	Enabled bool `mapstructure:"enabled"`
+	Enabled      bool   `mapstructure:"enabled"`
+	VerifyHeight int64  `mapstructure:"verify_height"`
+	VerifyHash   string `mapstructure:"verify_hash"`
 }
 
 // DefaultStateSyncConfig returns a default configuration for the state sync service
 func DefaultStateSyncConfig() *StateSyncConfig {
 	return &StateSyncConfig{
-		Enabled: true,
+		Enabled:      true,
+		VerifyHeight: 1,
+		VerifyHash:   "F00",
 	}
 }
 
@@ -767,6 +771,14 @@ func TestStateSyncConfig() *StateSyncConfig {
 
 // ValidateBasic performs basic validation.
 func (cfg *StateSyncConfig) ValidateBasic() error {
+	if cfg.Enabled {
+		if cfg.VerifyHeight <= 0 {
+			return fmt.Errorf("verify height is required")
+		}
+		if len(cfg.VerifyHash) == 0 {
+			return fmt.Errorf("verify hash is required")
+		}
+	}
 	return nil
 }
 
