@@ -63,7 +63,7 @@ func (ssR *Reactor) OnStart() error {
 			ssR.Logger.Info("Timed out looking for snapshots, starting fast sync")
 			ssR.enabled = false
 			if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
-				err := bcR.StartSync()
+				err := bcR.StartSync(0)
 				if err != nil {
 					ssR.Logger.Error("Failed to switch to fast sync", "err", err)
 				}
@@ -226,7 +226,7 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				ssR.Logger.Info("Restore complete, switching to fast sync")
 				ssR.enabled = false
 				if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
-					err := bcR.StartSync()
+					err := bcR.StartSync(int64(ssR.sync.snapshot.Height))
 					if err != nil {
 						ssR.Logger.Error("Failed to switch to fast sync", "err", err)
 					}
