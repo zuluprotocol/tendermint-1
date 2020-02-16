@@ -760,7 +760,7 @@ func DefaultStateSyncConfig() *StateSyncConfig {
 	return &StateSyncConfig{
 		Enabled:      true,
 		VerifyHeight: 1,
-		VerifyHash:   "F00",
+		VerifyHash:   "FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00",
 	}
 }
 

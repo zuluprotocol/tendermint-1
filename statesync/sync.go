@@ -21,9 +21,10 @@ var (
 // Sync manages a state sync operation
 type Sync struct {
 	sync.Mutex
-	conn      proxy.AppConnSnapshot
-	snapshot  *Snapshot
-	nextChunk uint64
+	conn          proxy.AppConnSnapshot
+	snapshot      *Snapshot
+	nextChunk     uint64
+	verifyAppHash []byte
 }
 
 // NewSync creates a new Sync
@@ -61,7 +62,7 @@ func (s *Sync) NextChunk() (uint64, uint32, uint64) {
 
 // Start attempts to start a new sync operation by offering the snapshot
 // to the state machine, returning an error if the snapshot is rejected.
-func (s *Sync) Start(snapshot *Snapshot) error {
+func (s *Sync) Start(snapshot *Snapshot, verifyAppHash []byte) error {
 	s.Lock()
 	defer s.Unlock()
 
@@ -96,6 +97,7 @@ func (s *Sync) Start(snapshot *Snapshot) error {
 	}
 	s.snapshot = snapshot
 	s.nextChunk = 0
+	s.verifyAppHash = verifyAppHash
 	return nil
 }
 
@@ -138,6 +140,8 @@ func (s *Sync) Apply(chunk *SnapshotChunk) error {
 			Data:     chunk.Data,
 			Checksum: chunk.Checksum[:],
 		},
+		// FIXME Rename to VerifyAppHash or something
+		ChainHash: s.verifyAppHash,
 	})
 	if err != nil {
 		return errors.Wrapf(err, "failed to apply snapshot chunk %v", chunk.Chunk)

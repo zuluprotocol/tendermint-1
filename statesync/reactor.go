@@ -16,9 +16,11 @@ import (
 	lite "github.com/tendermint/tendermint/lite2"
 	"github.com/tendermint/tendermint/lite2/provider"
 	httpp "github.com/tendermint/tendermint/lite2/provider/http"
+	litedb "github.com/tendermint/tendermint/lite2/store/db"
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/proxy"
 	sm "github.com/tendermint/tendermint/state"
+	db "github.com/tendermint/tm-db"
 )
 
 const (
@@ -40,6 +42,7 @@ type Reactor struct {
 	conn         proxy.AppConnSnapshot
 	sync         Sync
 	initialState sm.State
+	lightClient  *lite.Client
 }
 
 // NewReactor returns a new state sync reactor.
@@ -62,53 +65,84 @@ func (ssR *Reactor) OnStart() error {
 		ssR.Logger.Info("State sync disabled")
 		return nil
 	}
+
 	// Start looking for a verification source
-	go func() {
-		hash, err := hex.DecodeString(ssR.config.VerifyHash)
-		if err != nil {
-			panic(err)
-		}
-		primary, err := httpp.New(ssR.initialState.ChainID, "localhost:26657")
-		if err != nil {
-			panic(err)
-		}
-		lc, err := lite.NewClient(
-			ssR.initialState.ChainID,
-			lite.TrustOptions{
-				Period: 21 * 24 * time.Hour,
-				Height: ssR.config.VerifyHeight,
-				Hash:   hash,
-			},
-			primary,
-			[]provider.Provider{primary}, // FIXME Use witness
-			nil,
-			lite.UpdatePeriod(1*time.Second),
-			lite.Logger(ssR.Logger),
-		)
-		if err != nil {
-			panic(err)
-		}
-		err = lc.Start()
-		if err != nil {
-			panic(err)
-		}
-	}()
+	err := ssR.StartLightClient()
+	if err != nil {
+		ssR.Logger.Error(fmt.Sprintf("Failed to start light client: %v", err.Error()))
+	}
+
 	// Start a timeout to move to fast sync if no sync starts within 5 seconds
 	go func() {
 		time.Sleep(10 * time.Second)
 		if !ssR.sync.IsActive() && !ssR.sync.IsDone() {
 			// FIXME Only switch to fast sync if it is enabled, otherwise go straight to consensus
 			ssR.Logger.Info("Timed out looking for snapshots, starting fast sync")
-			ssR.enabled = false
-			if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
-				err := bcR.StartSync(0)
-				if err != nil {
-					ssR.Logger.Error("Failed to switch to fast sync", "err", err)
-				}
-			}
+			ssR.SwitchToFastSync(0)
 		}
 	}()
 	return nil
+}
+
+// StartLightClient starts a light client
+func (ssR *Reactor) StartLightClient() error {
+	hash, err := hex.DecodeString(ssR.config.VerifyHash)
+	if err != nil {
+		return err
+	}
+	// FIXME Don't hardcode
+	primary, err := httpp.New(ssR.initialState.ChainID, "http://192.168.10.2:26657")
+	if err != nil {
+		return err
+	}
+	w1, err := httpp.New(ssR.initialState.ChainID, "http://192.168.10.3:26657")
+	if err != nil {
+		return err
+	}
+	w2, err := httpp.New(ssR.initialState.ChainID, "http://192.168.10.4:26657")
+	if err != nil {
+		return err
+	}
+	ssR.Logger.Info("Light client create")
+	lc, err := lite.NewClient(
+		ssR.initialState.ChainID,
+		lite.TrustOptions{
+			Period: 21 * 24 * time.Hour,
+			Height: ssR.config.VerifyHeight,
+			Hash:   hash,
+		},
+		primary,
+		[]provider.Provider{w1, w2},
+		litedb.New(db.NewMemDB(), ""),
+		lite.UpdatePeriod(0),
+		lite.Logger(ssR.Logger),
+	)
+	if err != nil {
+		return err
+	}
+	err = lc.Start()
+	if err != nil {
+		return err
+	}
+	ssR.lightClient = lc
+	return nil
+}
+
+// SwitchToFastSync switches to fast sync
+func (ssR *Reactor) SwitchToFastSync(height int64) {
+	ssR.enabled = false
+	if ssR.lightClient != nil {
+		ssR.Logger.Info("Stopping light client")
+		ssR.lightClient.Stop()
+		ssR.lightClient = nil
+	}
+	if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
+		ssR.Logger.Info("Switching to fast sync")
+		err := bcR.StartSync(height)
+		if err != nil {
+			ssR.Logger.Error("Failed to switch to fast sync", "err", err)
+		}
+	}
 }
 
 // GetChannels implements Reactor
@@ -191,9 +225,20 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					return true
 				}
 			})
+			if ssR.lightClient == nil {
+				ssR.Logger.Error("No active light client, ignoring snapshots")
+				return
+			}
 			for _, snapshot := range snapshots {
+				ssR.Logger.Info("Fetching verified app hash for snapshot", "height", snapshot.Height, "format", snapshot.Format)
+				header, err := ssR.lightClient.VerifyHeaderAtHeight(int64(snapshot.Height), time.Now().UTC())
+				if err != nil {
+					ssR.Logger.Error("Failed to fetch header", "err", err.Error())
+					return
+				}
+				ssR.Logger.Info("Found app hash", "app_hash", hex.EncodeToString(header.Header.AppHash))
 				ssR.Logger.Info("Offering snapshot", "height", snapshot.Height, "format", snapshot.Format)
-				err := ssR.sync.Start(&snapshot)
+				err = ssR.sync.Start(&snapshot, header.Header.AppHash.Bytes())
 				if err != nil {
 					switch err {
 					case ErrSnapshotRejected, ErrSnapshotRejectedFormat, ErrSnapshotRejectedHeight:
@@ -261,8 +306,9 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					Chunk:  chunk,
 				}))
 			} else {
-				ssR.Logger.Info("Restore complete, switching to fast sync")
 				ssR.enabled = false
+				ssR.Logger.Info("Restore complete, verifying app hash")
+				// FIXME todo
 				if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
 					err := bcR.StartSync(int64(ssR.sync.snapshot.Height))
 					if err != nil {

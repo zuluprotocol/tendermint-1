@@ -382,8 +382,9 @@ func createBlockchainReactor(config *cfg.Config,
 func createStateSyncReactor(
 	config *cfg.Config,
 	logger log.Logger,
-	conn proxy.AppConnSnapshot) (*statesync.Reactor, error) {
-	reactor := statesync.NewReactor(config.StateSync, conn)
+	conn proxy.AppConnSnapshot,
+	state sm.State) (*statesync.Reactor, error) {
+	reactor := statesync.NewReactor(config.StateSync, conn, state)
 	reactor.SetLogger(logger.With("module", "statesync"))
 	return reactor, nil
 }
@@ -671,7 +672,7 @@ func NewNode(config *cfg.Config,
 	}
 
 	// Make StateSyncReactor
-	stateSyncReactor, err := createStateSyncReactor(config, logger, proxyApp.Snapshot())
+	stateSyncReactor, err := createStateSyncReactor(config, logger, proxyApp.Snapshot(), state)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not create state sync reactor")
 	}
