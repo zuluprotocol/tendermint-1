@@ -245,6 +245,10 @@ func loadValidatorsInfo(db dbm.DB, height int64) *ValidatorsInfo {
 	return v
 }
 
+func SaveValidatorsInfo(db dbm.DB, height int64, valSet *types.ValidatorSet) {
+	saveValidatorsInfo(db, height, height, valSet)
+}
+
 // saveValidatorsInfo persists the validator set.
 //
 // `height` is the effective height for which the validator is responsible for

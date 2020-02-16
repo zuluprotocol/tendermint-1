@@ -171,6 +171,11 @@ func (bs *BlockStore) LoadSeenCommit(height int64) *types.Commit {
 	return commit
 }
 
+func (bs *BlockStore) SaveSeenCommit(height int64, seenCommit *types.Commit) {
+	seenCommitBytes := cdc.MustMarshalBinaryBare(seenCommit)
+	bs.db.Set(calcSeenCommitKey(height), seenCommitBytes)
+}
+
 // SaveBlock persists the given block, blockParts, and seenCommit to the underlying db.
 // blockParts: Must be parts of the block
 // seenCommit: The +2/3 precommits that were seen which committed at height.
@@ -185,9 +190,10 @@ func (bs *BlockStore) SaveBlock(block *types.Block, blockParts *types.PartSet, s
 	height := block.Height
 	hash := block.Hash()
 
-	if g, w := height, bs.Height()+1; g != w {
+	// FIXME Should start from some given height
+	/*if g, w := height, bs.Height()+1; g != w {
 		panic(fmt.Sprintf("BlockStore can only save contiguous blocks. Wanted %v, got %v", w, g))
-	}
+	}*/
 	if !blockParts.IsComplete() {
 		panic(fmt.Sprintf("BlockStore can only save complete block part sets"))
 	}
@@ -226,9 +232,9 @@ func (bs *BlockStore) SaveBlock(block *types.Block, blockParts *types.PartSet, s
 }
 
 func (bs *BlockStore) saveBlockPart(height int64, index int, part *types.Part) {
-	if height != bs.Height()+1 {
+	/*if height != bs.Height()+1 {
 		panic(fmt.Sprintf("BlockStore can only save contiguous blocks. Wanted %v, got %v", bs.Height()+1, height))
-	}
+	}*/
 	partBytes := cdc.MustMarshalBinaryBare(part)
 	bs.db.Set(calcBlockPartKey(height, index), partBytes)
 }

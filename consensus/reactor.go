@@ -110,10 +110,10 @@ func (conR *Reactor) SwitchToConsensus(state sm.State, blocksSynced int) {
 	conR.mtx.Unlock()
 	conR.metrics.FastSyncing.Set(0)
 
-	if blocksSynced > 0 {
-		// dont bother with the WAL if we fast synced
-		conR.conS.doWALCatchup = false
-	}
+	//if blocksSynced > 0 {
+	// dont bother with the WAL if we fast synced
+	conR.conS.doWALCatchup = false
+	//}
 	err := conR.conS.Start()
 	if err != nil {
 		panic(fmt.Sprintf(`Failed to start consensus state: %v

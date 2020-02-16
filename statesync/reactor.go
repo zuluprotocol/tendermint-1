@@ -10,7 +10,7 @@ import (
 	"github.com/pkg/errors"
 
 	amino "github.com/tendermint/go-amino"
-	"github.com/tendermint/tendermint/abci/types"
+	abcitypes "github.com/tendermint/tendermint/abci/types"
 	bcRv0 "github.com/tendermint/tendermint/blockchain/v0"
 	cfg "github.com/tendermint/tendermint/config"
 	lite "github.com/tendermint/tendermint/lite2"
@@ -20,6 +20,7 @@ import (
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/proxy"
 	sm "github.com/tendermint/tendermint/state"
+	"github.com/tendermint/tendermint/types"
 	db "github.com/tendermint/tm-db"
 )
 
@@ -43,19 +44,23 @@ type Reactor struct {
 	sync         Sync
 	initialState sm.State
 	lightClient  *lite.Client
+	header       *types.SignedHeader
+	stateDB      db.DB
 }
 
 // NewReactor returns a new state sync reactor.
 func NewReactor(
 	config *cfg.StateSyncConfig,
 	conn proxy.AppConnSnapshot,
-	initialState sm.State) *Reactor {
+	initialState sm.State,
+	stateDB db.DB) *Reactor {
 	ssR := &Reactor{
 		config:       config,
 		enabled:      config.Enabled,
 		conn:         conn,
 		sync:         NewSync(conn),
 		initialState: initialState,
+		stateDB:      stateDB,
 	}
 	ssR.BaseReactor = *p2p.NewBaseReactor("StateSyncReactor", ssR)
 	return ssR
@@ -77,11 +82,11 @@ func (ssR *Reactor) OnStart() error {
 
 	// Start a timeout to move to fast sync if no sync starts within 5 seconds
 	go func() {
-		time.Sleep(10 * time.Second)
+		time.Sleep(7 * time.Second)
 		if !ssR.sync.IsActive() && !ssR.sync.IsDone() {
 			// FIXME Only switch to fast sync if it is enabled, otherwise go straight to consensus
 			ssR.Logger.Info("Timed out looking for snapshots, starting fast sync")
-			ssR.SwitchToFastSync(0)
+			ssR.SwitchToFastSync(nil, nil, nil)
 		}
 	}()
 	return nil
@@ -132,7 +137,7 @@ func (ssR *Reactor) StartLightClient() error {
 }
 
 // SwitchToFastSync switches to fast sync
-func (ssR *Reactor) SwitchToFastSync(height int64) {
+func (ssR *Reactor) SwitchToFastSync(state *sm.State, prevCommit *types.Commit, curCommit *types.Commit) {
 	ssR.enabled = false
 	if ssR.lightClient != nil {
 		ssR.Logger.Info("Stopping light client")
@@ -141,7 +146,7 @@ func (ssR *Reactor) SwitchToFastSync(height int64) {
 	}
 	if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
 		ssR.Logger.Info("Switching to fast sync")
-		err := bcR.StartSync(height)
+		err := bcR.StartSync(state, prevCommit, curCommit)
 		if err != nil {
 			ssR.Logger.Error("Failed to switch to fast sync", "err", err)
 		}
@@ -190,7 +195,7 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 	case MetadataChannel:
 		switch msg := msg.(type) {
 		case *ListSnapshotsRequestMessage:
-			resp, err := ssR.conn.ListSnapshotsSync(types.RequestListSnapshots{})
+			resp, err := ssR.conn.ListSnapshotsSync(abcitypes.RequestListSnapshots{})
 			if err != nil {
 				ssR.Logger.Error("Failed to list snapshots", "err", err)
 				return
@@ -241,6 +246,7 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					ssR.Logger.Error("Failed to fetch header", "err", err.Error())
 					return
 				}
+				ssR.header = header
 				ssR.Logger.Info("Found app hash", "app_hash", hex.EncodeToString(header.Header.AppHash))
 				ssR.Logger.Info("Offering snapshot", "height", snapshot.Height, "format", snapshot.Format)
 				err = ssR.sync.Start(&snapshot, header.Header.AppHash.Bytes())
@@ -268,7 +274,7 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 		switch msg := msg.(type) {
 		case *GetSnapshotChunkRequestMessage:
 			ssR.Logger.Info("Providing snapshot chunk", "height", msg.Height, "format", msg.Format, "chunk", msg.Chunk)
-			resp, err := ssR.conn.GetSnapshotChunkSync(types.RequestGetSnapshotChunk{
+			resp, err := ssR.conn.GetSnapshotChunkSync(abcitypes.RequestGetSnapshotChunk{
 				Height: msg.Height,
 				Format: msg.Format,
 				Chunk:  msg.Chunk,
@@ -311,8 +317,27 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					Chunk:  chunk,
 				}))
 			} else {
-				ssR.Logger.Info("Snapshot restoration complete")
-				ssR.SwitchToFastSync(int64(ssR.sync.snapshot.Height))
+				ssR.Logger.Info("Snapshot restoration complete", "height", ssR.sync.snapshot.Height)
+
+				prevHeader, err := ssR.lightClient.TrustedHeader(ssR.header.Height-1, time.Now().UTC())
+				if err != nil {
+					ssR.Logger.Error("Failed to fetch last commit header", "err", err.Error())
+					return
+				}
+
+				state := ssR.initialState.Copy()
+				state.LastBlockHeight = ssR.header.Height - 1
+				state.LastBlockID = ssR.header.LastBlockID
+				state.LastBlockTime = prevHeader.Time
+				state.LastResultsHash = ssR.header.LastResultsHash
+				state.LastValidators = state.Validators
+				state.LastHeightValidatorsChanged = ssR.header.Height - 1
+				state.AppHash = ssR.header.AppHash
+				ssR.Logger.Info("Saving state", "height", state.LastBlockHeight)
+				sm.SaveState(ssR.stateDB, state)
+				// FIXME Necessary because SaveState only persists validator set at height 1
+				sm.SaveValidatorsInfo(ssR.stateDB, state.LastBlockHeight, state.Validators)
+				ssR.SwitchToFastSync(&state, prevHeader.Commit, ssR.header.Commit)
 			}
 		}
 	}

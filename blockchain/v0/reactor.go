@@ -113,17 +113,28 @@ func (bcR *BlockchainReactor) SetLogger(l log.Logger) {
 // OnStart implements service.Service.
 func (bcR *BlockchainReactor) OnStart() error {
 	if bcR.fastSync && !bcR.stateSync {
-		bcR.StartSync(0)
+		bcR.StartSync(nil, nil, nil)
 	}
 	return nil
 }
 
 // StartSync runs a fast sync. It is called either on start, or by the state sync reactor.
-func (bcR *BlockchainReactor) StartSync(height int64) error {
-	if height == 0 {
-		height = 1
+func (bcR *BlockchainReactor) StartSync(state *sm.State, prevCommit *types.Commit, curCommit *types.Commit) error {
+	if state != nil {
+		bcR.pool.height = state.LastBlockHeight + 1
+		bcR.initialState = state.Copy()
 	}
-	bcR.pool.height = height
+	if prevCommit != nil {
+		bcR.Logger.Info("Saving seen commit", "height", state.LastBlockHeight, "commit", prevCommit.StringIndented(" "))
+		bcR.store.SaveSeenCommit(state.LastBlockHeight, prevCommit)
+	}
+	if prevCommit != nil {
+		bcR.Logger.Info("Saving seen commit", "height", state.LastBlockHeight+1, "commit", curCommit.StringIndented(" "))
+		bcR.store.SaveSeenCommit(state.LastBlockHeight+1, curCommit)
+	}
+	if bcR.pool.height == 0 {
+		bcR.pool.height = 1
+	}
 	err := bcR.pool.Start()
 	if err != nil {
 		return err
