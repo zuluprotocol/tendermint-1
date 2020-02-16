@@ -1,6 +1,7 @@
 package statesync
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"sync"
 
@@ -152,6 +153,12 @@ func (s *Sync) Apply(chunk *SnapshotChunk) error {
 			return ErrChunkVerify
 		default:
 			return errors.Errorf("failed to apply snapshot chunk %v", chunk.Chunk)
+		}
+	}
+
+	if chunk.Chunk >= s.snapshot.Chunks-1 {
+		if bytes.Compare(resp.AppHash, s.verifyAppHash) != 0 {
+			return ErrChunkVerify
 		}
 	}
 	s.nextChunk++

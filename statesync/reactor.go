@@ -46,7 +46,10 @@ type Reactor struct {
 }
 
 // NewReactor returns a new state sync reactor.
-func NewReactor(config *cfg.StateSyncConfig, conn proxy.AppConnSnapshot, initialState sm.State) *Reactor {
+func NewReactor(
+	config *cfg.StateSyncConfig,
+	conn proxy.AppConnSnapshot,
+	initialState sm.State) *Reactor {
 	ssR := &Reactor{
 		config:       config,
 		enabled:      config.Enabled,
@@ -231,7 +234,9 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 			}
 			for _, snapshot := range snapshots {
 				ssR.Logger.Info("Fetching verified app hash for snapshot", "height", snapshot.Height, "format", snapshot.Format)
-				header, err := ssR.lightClient.VerifyHeaderAtHeight(int64(snapshot.Height), time.Now().UTC())
+				// FIXME We fetch height+1, since snapshot height is *after* height, but light client
+				// app hash is before height was applied.
+				header, err := ssR.lightClient.VerifyHeaderAtHeight(int64(snapshot.Height+1), time.Now().UTC())
 				if err != nil {
 					ssR.Logger.Error("Failed to fetch header", "err", err.Error())
 					return
@@ -306,15 +311,8 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					Chunk:  chunk,
 				}))
 			} else {
-				ssR.enabled = false
-				ssR.Logger.Info("Restore complete, verifying app hash")
-				// FIXME todo
-				if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
-					err := bcR.StartSync(int64(ssR.sync.snapshot.Height))
-					if err != nil {
-						ssR.Logger.Error("Failed to switch to fast sync", "err", err)
-					}
-				}
+				ssR.Logger.Info("Snapshot restoration complete")
+				ssR.SwitchToFastSync(int64(ssR.sync.snapshot.Height))
 			}
 		}
 	}

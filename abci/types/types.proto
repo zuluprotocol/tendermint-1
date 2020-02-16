@@ -265,6 +265,7 @@ message ResponseApplySnapshotChunk {
       unknown = 0;        // Unknown or generic reason
       verify_failed = 1;  // Chunk verification failed
   }
+  bytes app_hash = 3;
 }
 
 
