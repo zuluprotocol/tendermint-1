@@ -2,6 +2,7 @@ package statesync
 
 import (
 	"crypto/sha1" // nolint: gosec
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"time"
@@ -12,8 +13,12 @@ import (
 	"github.com/tendermint/tendermint/abci/types"
 	bcRv0 "github.com/tendermint/tendermint/blockchain/v0"
 	cfg "github.com/tendermint/tendermint/config"
+	lite "github.com/tendermint/tendermint/lite2"
+	"github.com/tendermint/tendermint/lite2/provider"
+	httpp "github.com/tendermint/tendermint/lite2/provider/http"
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/proxy"
+	sm "github.com/tendermint/tendermint/state"
 )
 
 const (
@@ -30,19 +35,21 @@ const (
 // serving snapshots for peers doing state sync.
 type Reactor struct {
 	p2p.BaseReactor
-	config  *cfg.StateSyncConfig
-	enabled bool
-	conn    proxy.AppConnSnapshot
-	sync    Sync
+	config       *cfg.StateSyncConfig
+	enabled      bool
+	conn         proxy.AppConnSnapshot
+	sync         Sync
+	initialState sm.State
 }
 
 // NewReactor returns a new state sync reactor.
-func NewReactor(config *cfg.StateSyncConfig, conn proxy.AppConnSnapshot) *Reactor {
+func NewReactor(config *cfg.StateSyncConfig, conn proxy.AppConnSnapshot, initialState sm.State) *Reactor {
 	ssR := &Reactor{
-		config:  config,
-		enabled: config.Enabled,
-		conn:    conn,
-		sync:    NewSync(conn),
+		config:       config,
+		enabled:      config.Enabled,
+		conn:         conn,
+		sync:         NewSync(conn),
+		initialState: initialState,
 	}
 	ssR.BaseReactor = *p2p.NewBaseReactor("StateSyncReactor", ssR)
 	return ssR
@@ -55,6 +62,37 @@ func (ssR *Reactor) OnStart() error {
 		ssR.Logger.Info("State sync disabled")
 		return nil
 	}
+	// Start looking for a verification source
+	go func() {
+		hash, err := hex.DecodeString(ssR.config.VerifyHash)
+		if err != nil {
+			panic(err)
+		}
+		primary, err := httpp.New(ssR.initialState.ChainID, "localhost:26657")
+		if err != nil {
+			panic(err)
+		}
+		lc, err := lite.NewClient(
+			ssR.initialState.ChainID,
+			lite.TrustOptions{
+				Period: 21 * 24 * time.Hour,
+				Height: ssR.config.VerifyHeight,
+				Hash:   hash,
+			},
+			primary,
+			[]provider.Provider{primary}, // FIXME Use witness
+			nil,
+			lite.UpdatePeriod(1*time.Second),
+			lite.Logger(ssR.Logger),
+		)
+		if err != nil {
+			panic(err)
+		}
+		err = lc.Start()
+		if err != nil {
+			panic(err)
+		}
+	}()
 	// Start a timeout to move to fast sync if no sync starts within 5 seconds
 	go func() {
 		time.Sleep(10 * time.Second)
