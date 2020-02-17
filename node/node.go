@@ -610,17 +610,20 @@ func NewNode(config *cfg.Config,
 		return nil, err
 	}
 
-	// Create the handshaker, which calls RequestInfo, sets the AppVersion on the state,
-	// and replays any blocks as necessary to sync tendermint with the app.
 	consensusLogger := logger.With("module", "consensus")
-	if err := doHandshake(stateDB, state, blockStore, genDoc, eventBus, proxyApp, consensusLogger); err != nil {
-		return nil, err
-	}
 
-	// Reload the state. It will have the Version.Consensus.App set by the
-	// Handshake, and may have other modifications as well (ie. depending on
-	// what happened during block replay).
-	state = sm.LoadState(stateDB)
+	if !config.StateSync.Enabled {
+		// Create the handshaker, which calls RequestInfo, sets the AppVersion on the state,
+		// and replays any blocks as necessary to sync tendermint with the app.
+		if err := doHandshake(stateDB, state, blockStore, genDoc, eventBus, proxyApp, consensusLogger); err != nil {
+			return nil, err
+		}
+
+		// Reload the state. It will have the Version.Consensus.App set by the
+		// Handshake, and may have other modifications as well (ie. depending on
+		// what happened during block replay).
+		state = sm.LoadState(stateDB)
+	}
 
 	// If an address is provided, listen on the socket for a connection from an
 	// external signing process.
