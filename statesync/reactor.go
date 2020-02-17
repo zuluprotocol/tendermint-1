@@ -20,6 +20,7 @@ import (
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/proxy"
 	sm "github.com/tendermint/tendermint/state"
+	"github.com/tendermint/tendermint/store"
 	"github.com/tendermint/tendermint/types"
 	db "github.com/tendermint/tm-db"
 )
@@ -46,6 +47,7 @@ type Reactor struct {
 	lightClient  *lite.Client
 	header       *types.SignedHeader
 	stateDB      db.DB
+	blockStore   *store.BlockStore
 }
 
 // NewReactor returns a new state sync reactor.
@@ -53,7 +55,8 @@ func NewReactor(
 	config *cfg.StateSyncConfig,
 	conn proxy.AppConnSnapshot,
 	initialState sm.State,
-	stateDB db.DB) *Reactor {
+	stateDB db.DB,
+	blockStore *store.BlockStore) *Reactor {
 	ssR := &Reactor{
 		config:       config,
 		enabled:      config.Enabled,
@@ -61,6 +64,7 @@ func NewReactor(
 		sync:         NewSync(conn),
 		initialState: initialState,
 		stateDB:      stateDB,
+		blockStore:   blockStore,
 	}
 	ssR.BaseReactor = *p2p.NewBaseReactor("StateSyncReactor", ssR)
 	return ssR
@@ -137,7 +141,7 @@ func (ssR *Reactor) StartLightClient() error {
 }
 
 // SwitchToFastSync switches to fast sync
-func (ssR *Reactor) SwitchToFastSync(state *sm.State, prevCommit *types.Commit, curCommit *types.Commit) {
+func (ssR *Reactor) SwitchToFastSync(state *sm.State) {
 	ssR.enabled = false
 	if ssR.lightClient != nil {
 		ssR.Logger.Info("Stopping light client")
@@ -146,7 +150,7 @@ func (ssR *Reactor) SwitchToFastSync(state *sm.State, prevCommit *types.Commit, 
 	}
 	if bcR, ok := ssR.Switch.Reactor("BLOCKCHAIN").(*bcRv0.BlockchainReactor); ok {
 		ssR.Logger.Info("Switching to fast sync")
-		err := bcR.StartSync(state, prevCommit, curCommit)
+		err := bcR.StartSync(state)
 		if err != nil {
 			ssR.Logger.Error("Failed to switch to fast sync", "err", err)
 		}
@@ -244,6 +248,8 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				header, err := ssR.lightClient.VerifyHeaderAtHeight(int64(snapshot.Height+1), time.Now().UTC())
 				if err != nil {
 					ssR.Logger.Error("Failed to fetch header", "err", err.Error())
+					time.Sleep(time.Second)
+					src.Send(MetadataChannel, cdc.MustMarshalBinaryBare(&ListSnapshotsRequestMessage{}))
 					return
 				}
 				ssR.header = header
@@ -350,7 +356,6 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					ssR.Logger.Error("Failed to fetch prev validator set", "err", err.Error())
 				}
 
-				// The header we fetch is at Snapshot.Height + 1
 				state := sm.State{
 					Version: ssR.initialState.Version,
 					ChainID: ssR.initialState.ChainID,
@@ -359,13 +364,13 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					LastBlockID:     curHeader.Commit.BlockID,
 					LastBlockTime:   curHeader.Time,
 
-					NextValidators:              nextValidators, // FIXME
+					NextValidators:              nextValidators,
 					Validators:                  nextValidators,
 					LastValidators:              curValidators,
-					LastHeightValidatorsChanged: 0, // FIXME
+					LastHeightValidatorsChanged: 1,
 
-					ConsensusParams:                  ssR.initialState.ConsensusParams, // FIXME
-					LastHeightConsensusParamsChanged: 0,                                // FIXME
+					ConsensusParams:                  ssR.initialState.ConsensusParams,
+					LastHeightConsensusParamsChanged: 1,
 
 					LastResultsHash: ssR.header.LastResultsHash,
 					AppHash:         nextHeader.AppHash,
@@ -373,10 +378,14 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 
 				ssR.Logger.Info("Saving state", "height", state.LastBlockHeight)
 				sm.SaveState(ssR.stateDB, state)
-				// FIXME Necessary because SaveState only persists validator set at height 1
-				sm.SaveValidatorsInfo(ssR.stateDB, curHeader.Height, curValidators)
+				ssR.blockStore.SaveSeenCommit(prevHeader.Height, prevHeader.Commit)
+				ssR.blockStore.SaveSeenCommit(curHeader.Height, curHeader.Commit)
+				ssR.blockStore.SaveSeenCommit(nextHeader.Height, nextHeader.Commit)
+				sm.SaveValidatorsInfo(ssR.stateDB, 1, prevValidators)
 				sm.SaveValidatorsInfo(ssR.stateDB, prevHeader.Height, prevValidators)
-				ssR.SwitchToFastSync(&state, curHeader.Commit, nextHeader.Commit)
+				sm.SaveValidatorsInfo(ssR.stateDB, curHeader.Height, curValidators)
+				sm.SaveValidatorsInfo(ssR.stateDB, nextHeader.Height, nextValidators)
+				ssR.SwitchToFastSync(&state)
 			}
 		}
 	}

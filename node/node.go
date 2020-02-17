@@ -384,8 +384,9 @@ func createStateSyncReactor(
 	logger log.Logger,
 	conn proxy.AppConnSnapshot,
 	state sm.State,
-	stateDB dbm.DB) (*statesync.Reactor, error) {
-	reactor := statesync.NewReactor(config.StateSync, conn, state, stateDB)
+	stateDB dbm.DB,
+	blockStore *store.BlockStore) (*statesync.Reactor, error) {
+	reactor := statesync.NewReactor(config.StateSync, conn, state, stateDB, blockStore)
 	reactor.SetLogger(logger.With("module", "statesync"))
 	return reactor, nil
 }
@@ -676,7 +677,7 @@ func NewNode(config *cfg.Config,
 	}
 
 	// Make StateSyncReactor
-	stateSyncReactor, err := createStateSyncReactor(config, logger, proxyApp.Snapshot(), state, stateDB)
+	stateSyncReactor, err := createStateSyncReactor(config, logger, proxyApp.Snapshot(), state, stateDB, blockStore)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not create state sync reactor")
 	}
