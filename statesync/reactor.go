@@ -317,27 +317,54 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					Chunk:  chunk,
 				}))
 			} else {
-				ssR.Logger.Info("Snapshot restoration complete", "height", ssR.sync.snapshot.Height)
+				ssR.Logger.Info("Snapshot restoration complete", "height", ssR.sync.snapshot.Height,
+					"app_hash", hex.EncodeToString(ssR.sync.verifyAppHash))
 
-				prevHeader, err := ssR.lightClient.TrustedHeader(ssR.header.Height-1, time.Now().UTC())
+				// The header we fetch is at Snapshot.Height + 1
+				nextHeader := ssR.header
+
+				curHeader, err := ssR.lightClient.TrustedHeader(ssR.header.Height-1, time.Now().UTC())
 				if err != nil {
-					ssR.Logger.Error("Failed to fetch last commit header", "err", err.Error())
+					ssR.Logger.Error("Failed to fetch cur commit header", "err", err.Error())
 					return
 				}
 
-				state := ssR.initialState.Copy()
-				state.LastBlockHeight = ssR.header.Height - 1
-				state.LastBlockID = ssR.header.LastBlockID
-				state.LastBlockTime = prevHeader.Time
-				state.LastResultsHash = ssR.header.LastResultsHash
-				state.LastValidators = state.Validators
-				state.LastHeightValidatorsChanged = ssR.header.Height - 1
-				state.AppHash = ssR.header.AppHash
+				nextValidators, err := ssR.lightClient.TrustedValidatorSet(nextHeader.Height, time.Now().UTC())
+				if err != nil {
+					ssR.Logger.Error("Failed to fetch next validator set", "err", err.Error())
+				}
+
+				curValidators, err := ssR.lightClient.TrustedValidatorSet(curHeader.Height, time.Now().UTC())
+				if err != nil {
+					ssR.Logger.Error("Failed to fetch cur validator set", "err", err.Error())
+				}
+
+				// The header we fetch is at Snapshot.Height + 1
+				state := sm.State{
+					Version: ssR.initialState.Version,
+					ChainID: ssR.initialState.ChainID,
+
+					LastBlockHeight: curHeader.Height,
+					LastBlockID:     curHeader.Commit.BlockID,
+					LastBlockTime:   curHeader.Time,
+
+					NextValidators:              nextValidators, // FIXME
+					Validators:                  nextValidators,
+					LastValidators:              curValidators,
+					LastHeightValidatorsChanged: 0, // FIXME
+
+					ConsensusParams:                  ssR.initialState.ConsensusParams, // FIXME
+					LastHeightConsensusParamsChanged: 0,                                // FIXME
+
+					LastResultsHash: ssR.header.LastResultsHash,
+					AppHash:         nextHeader.AppHash,
+				}
+
 				ssR.Logger.Info("Saving state", "height", state.LastBlockHeight)
 				sm.SaveState(ssR.stateDB, state)
 				// FIXME Necessary because SaveState only persists validator set at height 1
-				sm.SaveValidatorsInfo(ssR.stateDB, state.LastBlockHeight, state.Validators)
-				ssR.SwitchToFastSync(&state, prevHeader.Commit, ssR.header.Commit)
+				sm.SaveValidatorsInfo(ssR.stateDB, state.LastBlockHeight, state.LastValidators)
+				ssR.SwitchToFastSync(&state, curHeader.Commit, nextHeader.Commit)
 			}
 		}
 	}
