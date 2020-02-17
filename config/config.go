@@ -758,7 +758,7 @@ type StateSyncConfig struct {
 // DefaultStateSyncConfig returns a default configuration for the state sync service
 func DefaultStateSyncConfig() *StateSyncConfig {
 	return &StateSyncConfig{
-		Enabled:      true,
+		Enabled:      false,
 		VerifyHeight: 1,
 		VerifyHash:   "FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00",
 	}
