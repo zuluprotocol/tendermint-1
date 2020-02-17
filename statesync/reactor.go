@@ -329,6 +329,12 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					return
 				}
 
+				prevHeader, err := ssR.lightClient.TrustedHeader(ssR.header.Height-2, time.Now().UTC())
+				if err != nil {
+					ssR.Logger.Error("Failed to fetch prev commit header", "err", err.Error())
+					return
+				}
+
 				nextValidators, err := ssR.lightClient.TrustedValidatorSet(nextHeader.Height, time.Now().UTC())
 				if err != nil {
 					ssR.Logger.Error("Failed to fetch next validator set", "err", err.Error())
@@ -337,6 +343,11 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				curValidators, err := ssR.lightClient.TrustedValidatorSet(curHeader.Height, time.Now().UTC())
 				if err != nil {
 					ssR.Logger.Error("Failed to fetch cur validator set", "err", err.Error())
+				}
+
+				prevValidators, err := ssR.lightClient.TrustedValidatorSet(prevHeader.Height, time.Now().UTC())
+				if err != nil {
+					ssR.Logger.Error("Failed to fetch prev validator set", "err", err.Error())
 				}
 
 				// The header we fetch is at Snapshot.Height + 1
@@ -363,7 +374,8 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 				ssR.Logger.Info("Saving state", "height", state.LastBlockHeight)
 				sm.SaveState(ssR.stateDB, state)
 				// FIXME Necessary because SaveState only persists validator set at height 1
-				sm.SaveValidatorsInfo(ssR.stateDB, state.LastBlockHeight, state.LastValidators)
+				sm.SaveValidatorsInfo(ssR.stateDB, curHeader.Height, curValidators)
+				sm.SaveValidatorsInfo(ssR.stateDB, prevHeader.Height, prevValidators)
 				ssR.SwitchToFastSync(&state, curHeader.Commit, nextHeader.Commit)
 			}
 		}
