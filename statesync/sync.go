@@ -82,6 +82,7 @@ func (s *Sync) Start(snapshot *Snapshot, verifyAppHash []byte) error {
 			Chunks:   snapshot.Chunks,
 			Metadata: snapshot.Metadata,
 		},
+		AppHash: verifyAppHash,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to offer snapshot to state machine")
@@ -141,8 +142,6 @@ func (s *Sync) Apply(chunk *SnapshotChunk) error {
 			Data:     chunk.Data,
 			Checksum: chunk.Checksum[:],
 		},
-		// FIXME Rename to VerifyAppHash or something
-		ChainHash: s.verifyAppHash,
 	})
 	if err != nil {
 		return errors.Wrapf(err, "failed to apply snapshot chunk %v", chunk.Chunk)

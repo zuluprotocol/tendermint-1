@@ -113,6 +113,7 @@ message RequestListSnapshots {
 // offers a snapshot to the application
 message RequestOfferSnapshot {
   Snapshot snapshot = 1;
+  bytes app_hash = 2;
 }
 
 // fetches a snapshot chunk
@@ -125,7 +126,6 @@ message RequestGetSnapshotChunk {
 // Applies a snapshot chunk
 message RequestApplySnapshotChunk {
   SnapshotChunk chunk = 1;
-  bytes chain_hash = 2;
 }
 
 //----------------------------------------
