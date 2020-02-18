@@ -1,6 +1,7 @@
 package statesync
 
 import (
+	"bytes"
 	"crypto/sha1" // nolint: gosec
 	"encoding/hex"
 	"fmt"
@@ -42,6 +43,7 @@ type Reactor struct {
 	config       *cfg.StateSyncConfig
 	enabled      bool
 	conn         proxy.AppConnSnapshot
+	connQuery    proxy.AppConnQuery
 	sync         Sync
 	initialState sm.State
 	lightClient  *lite.Client
@@ -54,6 +56,7 @@ type Reactor struct {
 func NewReactor(
 	config *cfg.StateSyncConfig,
 	conn proxy.AppConnSnapshot,
+	connQuery proxy.AppConnQuery,
 	initialState sm.State,
 	stateDB db.DB,
 	blockStore *store.BlockStore) *Reactor {
@@ -61,6 +64,7 @@ func NewReactor(
 		config:       config,
 		enabled:      config.Enabled,
 		conn:         conn,
+		connQuery:    connQuery,
 		sync:         NewSync(conn),
 		initialState: initialState,
 		stateDB:      stateDB,
@@ -323,6 +327,23 @@ func (ssR *Reactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 					Chunk:  chunk,
 				}))
 			} else {
+
+				resp, err := ssR.connQuery.InfoSync(proxy.RequestInfo)
+				if err != nil {
+					ssR.Logger.Error("Failed to query app", "err", err.Error())
+					return
+				}
+
+				if uint64(resp.LastBlockHeight) != ssR.sync.snapshot.Height {
+					ssR.Logger.Error("Restore failed, found app height %v expected %v",
+						resp.LastBlockHeight, ssR.sync.snapshot.Height)
+				}
+
+				if bytes.Compare(resp.LastBlockAppHash, ssR.sync.verifyAppHash) != 0 {
+					ssR.Logger.Error("Restore failed, found app hash %v expected %v",
+						hex.EncodeToString(resp.LastBlockAppHash), hex.EncodeToString(ssR.sync.verifyAppHash))
+				}
+
 				ssR.Logger.Info("Snapshot restoration complete", "height", ssR.sync.snapshot.Height,
 					"app_hash", hex.EncodeToString(ssR.sync.verifyAppHash))
 
