@@ -39,14 +39,14 @@ func NewSync(conn proxy.AppConnSnapshot) Sync {
 func (s *Sync) IsActive() bool {
 	s.Lock()
 	defer s.Unlock()
-	return s.snapshot != nil && s.nextChunk < s.snapshot.Chunks
+	return s.snapshot != nil && s.nextChunk <= s.snapshot.Chunks
 }
 
 // IsDone checks whether the state sync has completed.
 func (s *Sync) IsDone() bool {
 	s.Lock()
 	defer s.Unlock()
-	return s.snapshot != nil && s.nextChunk >= s.snapshot.Chunks
+	return s.snapshot != nil && s.nextChunk > s.snapshot.Chunks
 }
 
 // NextChunk returns the height, format, and index for the next chunk, or
@@ -54,7 +54,7 @@ func (s *Sync) IsDone() bool {
 func (s *Sync) NextChunk() (uint64, uint32, uint32) {
 	s.Lock()
 	defer s.Unlock()
-	if s.snapshot == nil || s.nextChunk >= s.snapshot.Chunks {
+	if s.snapshot == nil || s.nextChunk > s.snapshot.Chunks {
 		return 0, 0, 0
 	} else {
 		return s.snapshot.Height, s.snapshot.Format, s.nextChunk
@@ -98,7 +98,7 @@ func (s *Sync) Start(snapshot *Snapshot, verifyAppHash []byte) error {
 		}
 	}
 	s.snapshot = snapshot
-	s.nextChunk = 0
+	s.nextChunk = 1
 	s.verifyAppHash = verifyAppHash
 	return nil
 }
@@ -111,11 +111,14 @@ func (s *Sync) Apply(chunk *SnapshotChunk) error {
 	if s.snapshot == nil {
 		return errors.New("no state sync in progress")
 	}
-	if s.nextChunk >= s.snapshot.Chunks {
+	if s.nextChunk > s.snapshot.Chunks {
 		return errors.New("state sync already completed")
 	}
 	if chunk == nil {
 		return errors.New("received nil snapshot chunk")
+	}
+	if chunk.Chunk == 0 {
+		return errors.New("received chunk with invalid index 0")
 	}
 	if chunk.Height != s.snapshot.Height {
 		return errors.Errorf("received snapshot chunk for height %v, expected %v",
@@ -155,7 +158,7 @@ func (s *Sync) Apply(chunk *SnapshotChunk) error {
 		}
 	}
 
-	if chunk.Chunk >= s.snapshot.Chunks-1 {
+	if chunk.Chunk >= s.snapshot.Chunks {
 		if bytes.Compare(resp.AppHash, s.verifyAppHash) != 0 {
 			return ErrChunkVerify
 		}
