@@ -438,7 +438,7 @@ func RegisterMessages(cdc *amino.Codec) {
 type Snapshot struct {
 	Height   uint64
 	Format   uint32
-	Chunks   uint64
+	Chunks   uint32
 	Metadata []byte
 }
 
@@ -454,8 +454,8 @@ func (s *Snapshot) ValidateBasic() error {
 
 type SnapshotChunk struct { // nolint: go-lint
 	Height   uint64
-	Chunk    uint64
 	Format   uint32
+	Chunk    uint32
 	Data     []byte
 	Checksum [sha1.Size]byte
 }
@@ -496,7 +496,7 @@ func (m *ListSnapshotsResponseMessage) ValidateBasic() error {
 type GetSnapshotChunkRequestMessage struct {
 	Height uint64
 	Format uint32
-	Chunk  uint64
+	Chunk  uint32
 }
 
 func (m *GetSnapshotChunkRequestMessage) ValidateBasic() error {

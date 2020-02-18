@@ -24,7 +24,7 @@ type Sync struct {
 	sync.Mutex
 	conn          proxy.AppConnSnapshot
 	snapshot      *Snapshot
-	nextChunk     uint64
+	nextChunk     uint32
 	verifyAppHash []byte
 }
 
@@ -51,7 +51,7 @@ func (s *Sync) IsDone() bool {
 
 // NextChunk returns the height, format, and index for the next chunk, or
 // all 0 if there is no active sync.
-func (s *Sync) NextChunk() (uint64, uint32, uint64) {
+func (s *Sync) NextChunk() (uint64, uint32, uint32) {
 	s.Lock()
 	defer s.Unlock()
 	if s.snapshot == nil || s.nextChunk >= s.snapshot.Chunks {
