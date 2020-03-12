@@ -714,40 +714,47 @@ func (c *Client) bisection(
 	newVals *types.ValidatorSet,
 	now time.Time) error {
 
+	type HeaderSet struct {
+		sh  *types.SignedHeader
+		val *types.ValidatorSet
+	}
+
 	var (
+		headerCache = []HeaderSet{HeaderSet{newHeader, newVals}}
+		depth       = 0
+
 		trustedHeader = initiallyTrustedHeader
 		trustedVals   = initiallyTrustedVals
-
-		interimHeader = newHeader
-		interimVals   = newVals
 	)
 
 	for {
 		c.logger.Debug("Verify newHeader against trustedHeader",
 			"trustedHeight", trustedHeader.Height,
 			"trustedHash", hash2str(trustedHeader.Hash()),
-			"newHeight", interimHeader.Height,
-			"newHash", hash2str(interimHeader.Hash()))
+			"newHeight", headerCache[depth].sh.Height,
+			"newHash", hash2str(headerCache[depth].sh.Hash()))
 
-		err := Verify(c.chainID, trustedHeader, trustedVals, interimHeader, interimVals, c.trustingPeriod, now,
+		err := Verify(c.chainID, trustedHeader, trustedVals, headerCache[depth].sh, headerCache[depth].val, c.trustingPeriod, now,
 			c.trustLevel)
 		switch err.(type) {
 		case nil:
-			if interimHeader.Height == newHeader.Height {
+			if depth == 0 {
 				return nil
 			}
 
 			// Update the lower bound to the previous upper bound
-			trustedHeader, trustedVals = interimHeader, interimVals
+			trustedHeader, trustedVals = headerCache[depth].sh, headerCache[depth].val
 			// Update the upper bound to the untrustedHeader
-			interimHeader, interimVals = newHeader, newVals
+			depth = 0
 
 		case ErrNewValSetCantBeTrusted:
-			pivotHeight := (interimHeader.Height + trustedHeader.Height) / 2
-			interimHeader, interimVals, err = c.fetchHeaderAndValsAtHeight(pivotHeight)
+			pivotHeight := (headerCache[depth].sh.Height + trustedHeader.Height) / 2
+			depth++
+			interimHeader, interimVals, err := c.fetchHeaderAndValsAtHeight(pivotHeight)
 			if err != nil {
 				return err
 			}
+			headerCache[depth] = HeaderSet{interimHeader, interimVals}
 
 		case ErrInvalidHeader:
 			c.logger.Error("primary sent invalid header -> replacing", "err", err)
