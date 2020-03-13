@@ -720,7 +720,7 @@ func (c *Client) bisection(
 	}
 
 	var (
-		headerCache = []HeaderSet{HeaderSet{newHeader, newVals}}
+		headerCache = []HeaderSet{{newHeader, newVals}}
 		depth       = 0
 
 		trustedHeader = initiallyTrustedHeader
@@ -734,8 +734,8 @@ func (c *Client) bisection(
 			"newHeight", headerCache[depth].sh.Height,
 			"newHash", hash2str(headerCache[depth].sh.Hash()))
 
-		err := Verify(c.chainID, trustedHeader, trustedVals, headerCache[depth].sh, headerCache[depth].val, c.trustingPeriod, now,
-			c.trustLevel)
+		err := Verify(c.chainID, trustedHeader, trustedVals, headerCache[depth].sh, headerCache[depth].val,
+			c.trustingPeriod, now, c.trustLevel)
 		switch err.(type) {
 		case nil:
 			if depth == 0 {
