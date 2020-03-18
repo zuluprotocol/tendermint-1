@@ -108,5 +108,8 @@ some other node.
 See
 https://docs.tendermint.com/master/tendermint-core/light-client-protocol.html
 for usage example.
+Or see
+https://github.com/tendermint/spec/tree/master/spec/consensus/light-client
+for the full spec
 */
 package lite
