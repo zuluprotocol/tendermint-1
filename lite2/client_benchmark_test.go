@@ -19,8 +19,8 @@ import (
 //
 // Remember that none of these benchmarks account for network latency.
 var (
-	largeFullNode    = mockp.New(GenMockNode(chainID, 1000, 100, 1, bTime))
-	genesisHeader, _ = largeFullNode.SignedHeader(1)
+	benchmarkFullNode = mockp.New(GenMockNode(chainID, 1000, 100, 1, bTime))
+	genesisHeader, _  = benchmarkFullNode.SignedHeader(1)
 )
 
 func BenchmarkSequence(b *testing.B) {
@@ -31,8 +31,8 @@ func BenchmarkSequence(b *testing.B) {
 			Height: 1,
 			Hash:   genesisHeader.Hash(),
 		},
-		largeFullNode,
-		[]provider.Provider{largeFullNode},
+		benchmarkFullNode,
+		[]provider.Provider{benchmarkFullNode},
 		dbs.New(dbm.NewMemDB(), chainID),
 		Logger(log.TestingLogger()),
 		SequentialVerification(),
@@ -58,8 +58,8 @@ func BenchmarkBisection(b *testing.B) {
 			Height: 1,
 			Hash:   genesisHeader.Hash(),
 		},
-		largeFullNode,
-		[]provider.Provider{largeFullNode},
+		benchmarkFullNode,
+		[]provider.Provider{benchmarkFullNode},
 		dbs.New(dbm.NewMemDB(), chainID),
 		Logger(log.TestingLogger()),
 	)
@@ -77,7 +77,7 @@ func BenchmarkBisection(b *testing.B) {
 }
 
 func BenchmarkBackwards(b *testing.B) {
-	trustedHeader, _ := largeFullNode.SignedHeader(0)
+	trustedHeader, _ := benchmarkFullNode.SignedHeader(0)
 	c, err := NewClient(
 		chainID,
 		TrustOptions{
@@ -85,8 +85,8 @@ func BenchmarkBackwards(b *testing.B) {
 			Height: trustedHeader.Height,
 			Hash:   trustedHeader.Hash(),
 		},
-		largeFullNode,
-		[]provider.Provider{largeFullNode},
+		benchmarkFullNode,
+		[]provider.Provider{benchmarkFullNode},
 		dbs.New(dbm.NewMemDB(), chainID),
 		Logger(log.TestingLogger()),
 	)
