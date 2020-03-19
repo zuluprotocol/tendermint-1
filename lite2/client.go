@@ -491,6 +491,7 @@ func (c *Client) VerifyHeaderAtHeight(height int64, now time.Time) (*types.Signe
 // validator set has signed the new header. If it's not the case and the
 // headers are not adjacent, bisection is performed and necessary (not all)
 // intermediate headers will be requested. See the specification for details.
+// Intermediate headers are not saved to database.
 // https://github.com/tendermint/spec/blob/master/spec/consensus/light-client.md
 //
 // It returns ErrOldHeaderExpired if the latest trusted header expired.
@@ -679,11 +680,9 @@ func (c *Client) bisection(
 				if err != nil {
 					return err
 				}
-				depth++
 				headerCache = append(headerCache, headerSet{interimHeader, interimVals})
-			} else { // or we shift to the next header in the cache
-				depth++
 			}
+			depth++
 
 		case ErrInvalidHeader:
 			c.logger.Error("primary sent invalid header -> replacing", "err", err)
