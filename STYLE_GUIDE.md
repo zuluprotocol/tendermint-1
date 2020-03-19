@@ -16,6 +16,7 @@ If you wish to gain some further understanding, we recommend having a read on ho
 Perhaps more key for code readability than good commenting is having the right structure. As a rule of thumb, try to write
 in a logical order of importance, taking a little time to think how to order and divide the code such that someone could
 scroll down and understand the functionality of it just as well as you do. A loose example of such order would be:
+* Constants and global variables
 * Main Struct
 * Options (only if they are seen as critical to the struct else they should be placed in another file)
 * Initialisation / Start and stop of the service
@@ -49,41 +50,35 @@ For further inspiration checkout https://nvie.com/posts/a-successful-git-branchi
 
  * Production branches
    * Production repos never push to `master` or `develop` branches directly. Push-master can merge to these branches.
-   * `develop` should always pass Continuous Integration (CI), Continuous Delivery (CD) tests
    * A release is a successful PR from the `develop` to `master`. The contents
      from the PRs merged into develop forms the as basis for the release
  * Feature branches
    * should follow the naming convention `yourname/ghi-description`, where `ghi` is the github issue number
    * all branches should be in lowercase, underscores/dashes are okay in branch names
-   * should have an open PR with the name "WIP: your feature description"
-   * All feature PRs should be opened for merge to the `develop` branch, unless stacked on other PR leading to `develop`.
-    * Ideally, for faster merges, break your PR into several PRs that stack on top of each other and lead to `develop`.
+   * Use the draft PR github feature for works in progress
  * Reference branches
-   * Sometimes it is necessary to keep a branch with reference information even there there is no intention of merging
+   * Sometimes it is necessary to keep a branch with reference information even if there is no intention of merging
    * These branches should be named `yourname/reference-ghi-description`, where `ghi` is the github issue number
  * Pull Requests (PRs)
-   * Do not merge PRs that aren't final -- e.g. no code dead code or code that won't be used should be committed.
-   * Always delete branch immediately after merge
-   * When there are to many commits, [Squash](https://stackoverflow.com/questions/5189560/squash-my-last-x-commits-together-using-git)
-   them to keep the history clean - don't do this where commits ought to be kept for future reference.
-   * All pull requests should include any relevant additions to the `CHANGELOG.md`, if the PR is opened against the
-     develop branch then include the changes under an `unreleased changes` header at the top of the document.
+   * Do not merge PRs that aren't final -- e.g. no dead code or code that won't be used should be committed.
+   * We squash merge all Pull Requests, other than those for releases, before
+   [squash merging](https://stackoverflow.com/questions/5189560/squash-my-last-x-commits-together-using-git) please
+   read through the final commit message and adjust/cleanup commit messages that would not bring value to the reader
+   when merged into master.
+   * All pull requests should include any relevant additions to the `CHANGELOG_PENDING.md`.
 
 ## Linters
 
 These must be applied to all (go) repos.
 
  * [shellcheck](https://github.com/koalaman/shellcheck)
- * [gometalinter (covers all important linters)](https://github.com/alecthomas/gometalinter)
-   - See the `Makefile` in each repo for ongoing linting progress. Running `make metalinter` is the ultimate goal, while `make metalinter_test` enables all the linters that are currently passing, for integration with CI.
-   * gometalinter may make use of the [Tendermint fork of golint](https://github.com/tendermint/lint/)
+ * [golangci (covers all important linters)](https://github.com/golangci/golangci-lint)
+   - See the `.golangcli.yml` file in each repo for linter configuration.
 
 ## Various
 
  * Reserve "Save" and "Load" for long-running persistence operations. When parsing bytes, use "Encode" or "Decode".
- * Receiver variables should be at least 2 letters.  e.g. not `func (s \*Something) MyFunc(){}` but `func (sm *Something) MyFunc(){}`.  This makes refactoring easier when we rename Something to something else.
  * Maintain consistency across the codebase.
- * Do not use "instance" in function names.
  * Functions that return functions should have the suffix `Fn`
  * A struct generally shouldn’t have a field named after itself, aka. this shouldn't occur:
 ``` golang
@@ -101,8 +96,7 @@ type middleware struct {
 Sometimes it's necessary to rename libraries to avoid naming collisions or ambiguity.
 
  * Use [goimports](https://godoc.org/golang.org/x/tools/cmd/goimports)
- * Separate imports into blocks - one for the standard lib and one for others. In some cases, it's nice to
- separate into three: standard lib, external libs, tendermint libs.
+ * Separate imports into blocks - one for the standard lib, one for external libs and one for tendermint libs.
  * Here are some common library labels for consistency:
    - dbm "github.com/tendermint/tmlibs/db"
    - cmn "github.com/tendermint/tmlibs/common"
@@ -114,10 +108,6 @@ Sometimes it's necessary to rename libraries to avoid naming collisions or ambig
 
 ## Dependencies
 
- * Use [dep](https://github.com/golang/dep).
- * Never edit the Gopkg.lock file, instead if you need to lock a dependancy to a certain git hash, the `version` can
- be set to the desired hash in Gopkg.toml. For more information on advanced usage of the `Gopkg.toml` file see
-[this](https://golang.github.io/dep/docs/daily-dep.html).
  * Dependencies should be pinned by a release tag, or specific commit, to avoid breaking `go get` when external dependencies are updated.
 
 ## Testing
@@ -128,19 +118,19 @@ Sometimes it's necessary to rename libraries to avoid naming collisions or ambig
    * Make use of table driven testing where possible and not-cumbersome
      - [Inspiration](https://dave.cheney.net/2013/06/09/writing-table-driven-tests-in-go)
    * Make use of [assert](https://godoc.org/github.com/stretchr/testify/assert) and [require](https://godoc.org/github.com/stretchr/testify/require)
- * For Bash testing:
-   * Checkout [shunit2](https://github.com/kward/shunit2) and [bats](https://github.com/sstephenson/bats)
-   * In general, bash testing should be kept to a minimum.
+ * When using mocks, it is recommended to use either [testify mock](https://pkg.go.dev/github.com/stretchr/testify/mock
+ ) or [Mockery](https://github.com/vektra/mockery)
 
 ## Errors
 
- * Avoid [pkg/errors](https://github.com/pkg/errors), it's a [broken system](https://github.com/pkg/errors/issues/144).
+ * Ensure that errors are concise, clear and traceable.
+ * Use stdlib errors package.
+ * For wrapping errors, use `fmt.Errorf()` with `%w`.
 
 ## Config
 
  * Currently the TOML filetype is being used for config files
  * A good practice is to store the default Config file under `~/.[yourAppName]/config.toml`
- * Implement your config setup with [Viper](https://github.com/spf13/viper)
 
 ## CLI
 
