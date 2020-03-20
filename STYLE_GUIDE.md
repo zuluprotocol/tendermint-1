@@ -10,7 +10,6 @@ Please, before going through the rest of the document, have a read over the [syn
 If you wish to gain some further understanding, we recommend having a read on how to code [effective go](https://golang.org/doc/effective_go.html)
 
 
-
 ## Code Structure
 
 Perhaps more key for code readability than good commenting is having the right structure. As a rule of thumb, try to write
@@ -31,8 +30,8 @@ scroll down and understand the functionality of it just as well as you do. A loo
  * Use a linter (see below) and generally try to keep the linter happy (where it makes sense).
  * Think about documentation, and try to leave godoc comments, when it will help new developers.
  * Every package should have a high level doc.go file to describe the purpose of that package, its main functions, and any other relevant information.
- * `TODO` should not be used in lieu of correctness.  It can be used sparingly to document future direction.
- * `BUG` / `FIXME` should be avoided; these should instead be documented as specific issues that can be linked to in the code.
+ * `TODO` should not be used. If important enough should be recorded as an issue.
+ * `BUG` / `FIXME` should be used sparingly to guide future developers on some of the vulnerabilities of the code.
  * `XXX` can be used in work-in-progress (prefixed with "WIP:" on github) branches but they must be removed before approving a PR.
  * Libraries *should* panic on developer usage error.
  * Applications (e.g. clis/servers) *should* panic on unexpected unrecoverable errors and print a stack trace.
@@ -42,30 +41,6 @@ scroll down and understand the functionality of it just as well as you do. A loo
  * Use a space after comment deliminter (ex. `// your comment`).
  * Many comments are not sentences, these should begin with a lower case letter and end without a period.
  * The first letter of sentences in comments are capitalized and ends with a period.
-
-## Github
-
-Development should following the regimented structure for branches and pull requests outlined herein.
-For further inspiration checkout https://nvie.com/posts/a-successful-git-branching-model/.
-
- * Production branches
-   * Production repos never push to `master` or `develop` branches directly. Push-master can merge to these branches.
-   * A release is a successful PR from the `develop` to `master`. The contents
-     from the PRs merged into develop forms the as basis for the release
- * Feature branches
-   * should follow the naming convention `yourname/ghi-description`, where `ghi` is the github issue number
-   * all branches should be in lowercase, underscores/dashes are okay in branch names
-   * Use the draft PR github feature for works in progress
- * Reference branches
-   * Sometimes it is necessary to keep a branch with reference information even if there is no intention of merging
-   * These branches should be named `yourname/reference-ghi-description`, where `ghi` is the github issue number
- * Pull Requests (PRs)
-   * Do not merge PRs that aren't final -- e.g. no dead code or code that won't be used should be committed.
-   * We squash merge all Pull Requests, other than those for releases, before
-   [squash merging](https://stackoverflow.com/questions/5189560/squash-my-last-x-commits-together-using-git) please
-   read through the final commit message and adjust/cleanup commit messages that would not bring value to the reader
-   when merged into master.
-   * All pull requests should include any relevant additions to the `CHANGELOG_PENDING.md`.
 
 ## Linters
 
