@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"runtime"
 
 	"github.com/tendermint/tendermint/abci/types"
 	cmn "github.com/tendermint/tendermint/libs/common"
@@ -150,9 +151,11 @@ func (s *SocketServer) handleRequests(closeConn chan error, conn io.Reader, resp
 
 	defer func() {
 		// make sure to recover from any app-related panics to allow proper socket cleanup
-		r := recover()
-		if r != nil {
-			closeConn <- fmt.Errorf("recovered from panic: %v", r)
+		if err := recover(); err != nil{
+			const size = 64 << 10
+			buf := make([]byte, size)
+			buf = buf[:runtime.Stack(buf, false)]
+			closeConn <- fmt.Errorf("recovered from panic: %v\n%s", err, buf)
 			s.appMtx.Unlock()
 		}
 	}()
