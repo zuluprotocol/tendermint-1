@@ -21,9 +21,9 @@ type AppConnConsensus interface {
 	InitChainSync(context.Context, types.RequestInitChain) (*types.ResponseInitChain, error)
 
 	BeginBlockSync(context.Context, types.RequestBeginBlock) (*types.ResponseBeginBlock, error)
-	DeliverTxAsync(context.Context, types.RequestDeliverTx) (*abciclient.ReqRes, error)
 	EndBlockSync(context.Context, types.RequestEndBlock) (*types.ResponseEndBlock, error)
 	CommitSync(context.Context) (*types.ResponseCommit, error)
+	DeliverTx(context.Context, types.RequestDeliverTx) (*types.ResponseDeliverTx, error)
 }
 
 type AppConnMempool interface {
@@ -93,12 +93,12 @@ func (app *appConnConsensus) BeginBlockSync(
 	return app.appConn.BeginBlockSync(ctx, req)
 }
 
-func (app *appConnConsensus) DeliverTxAsync(
+func (app *appConnConsensus) DeliverTx(
 	ctx context.Context,
 	req types.RequestDeliverTx,
-) (*abciclient.ReqRes, error) {
-	defer addTimeSample(app.metrics.MethodTiming.With("method", "deliver_tx", "type", "async"))()
-	return app.appConn.DeliverTxAsync(ctx, req)
+) (*types.ResponseDeliverTx, error) {
+	defer addTimeSample(app.metrics.MethodTiming.With("method", "deliver_tx", "type", "sync"))()
+	return app.appConn.DeliverTx(ctx, req)
 }
 
 func (app *appConnConsensus) EndBlockSync(
