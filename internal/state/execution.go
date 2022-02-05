@@ -151,7 +151,8 @@ func (blockExec *BlockExecutor) ValidateBlock(state State, block *types.Block) e
 func (blockExec *BlockExecutor) ApplyBlock(
 	state State, blockID types.BlockID, block *types.Block,
 ) (State, error) {
-
+	fmt.Printf("BEGIN APPLY BLOCK: %v\n", time.Now().Format(time.RFC3339Nano))
+	defer func() { fmt.Printf("END APPLY BLOCK  : %v\n", time.Now().Format(time.RFC3339Nano)) }()
 	// validate the block if we haven't already
 	if err := blockExec.ValidateBlock(state, block); err != nil {
 		return state, ErrInvalidBlock(err)
