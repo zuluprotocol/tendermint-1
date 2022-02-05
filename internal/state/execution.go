@@ -196,26 +196,23 @@ func (blockExec *BlockExecutor) ApplyBlock(
 	if err != nil {
 		return state, fmt.Errorf("commit failed for application: %v", err)
 	}
-
+	fmt.Printf("BEGIN TM COMMIT  : %v\n", time.Now().Format(time.RFC3339Nano))
 	// Lock mempool, commit app state, update mempoool.
 	appHash, retainHeight, err := blockExec.Commit(state, block, abciResponses.DeliverTxs)
 	if err != nil {
 		return state, fmt.Errorf("commit failed for application: %v", err)
 	}
-
+	fmt.Printf("END TM COMMIT    : %v\n", time.Now().Format(time.RFC3339Nano))
 	// Update evpool with the latest state.
 	blockExec.evpool.Update(state, block.Evidence.Evidence)
-
-	fail.Fail() // XXX
-
+	fmt.Printf("END EVPOOL UPDATE: %v\n", time.Now().Format(time.RFC3339Nano))
 	// Update the app hash and save the state.
 	state.AppHash = appHash
 	if err := blockExec.store.Save(state); err != nil {
 		return state, err
 	}
 
-	fail.Fail() // XXX
-
+	fmt.Printf("END STORE SAVE   : %v\n", time.Now().Format(time.RFC3339Nano))
 	// Prune old heights, if requested by ABCI app.
 	if retainHeight > 0 {
 		pruned, err := blockExec.pruneBlocks(retainHeight)
@@ -228,11 +225,11 @@ func (blockExec *BlockExecutor) ApplyBlock(
 
 	// reset the verification cache
 	blockExec.cache = make(map[string]struct{})
-
+	fmt.Printf("END PRUNE        : %v\n", time.Now().Format(time.RFC3339Nano))
 	// Events are fired after everything else.
 	// NOTE: if we crash between Commit and Save, events wont be fired during replay
 	fireEvents(blockExec.logger, blockExec.eventBus, block, blockID, abciResponses, validatorUpdates)
-
+	fmt.Printf("END FIRE EVT     : %v\n", time.Now().Format(time.RFC3339Nano))
 	return state, nil
 }
 
