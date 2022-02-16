@@ -98,7 +98,7 @@ func (app *appConnConsensus) DeliverTx(
 	req types.RequestDeliverTx,
 ) (*types.ResponseDeliverTx, error) {
 	defer addTimeSample(app.metrics.MethodTiming.With("method", "deliver_tx", "type", "sync"))()
-	return app.appConn.DeliverTx(ctx, req)
+	return app.appConn.DeliverTxSync(ctx, req)
 }
 
 func (app *appConnConsensus) EndBlockSync(
