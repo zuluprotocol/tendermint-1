@@ -200,6 +200,7 @@ func (cli *socketClient) didRecvResponse(res *types.Response) error {
 	}
 
 	reqres.Response = res
+	reqres.SetDone()
 	reqres.Done()            // release waiters
 	cli.reqSent.Remove(next) // pop first item from linked list
 
