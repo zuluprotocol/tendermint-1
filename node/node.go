@@ -850,8 +850,10 @@ func (n *nodeImpl) OnStop() {
 		}
 	}
 
-	if err := n.pexReactor.Stop(); err != nil {
-		n.Logger.Error("failed to stop the PEX v2 reactor", "err", err)
+	if n.pexReactor != nil {
+		if err := n.pexReactor.Stop(); err != nil {
+			n.Logger.Error("failed to stop the PEX v2 reactor", "err", err)
+		}
 	}
 
 	if n.config.P2P.UseLegacy {
